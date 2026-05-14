@@ -1,0 +1,182 @@
+// Codegen: read the vendored nextflow_schema.json at the repo root, flatten
+// nested `properties` to dotted paths, classify each leaf's shape, and emit a
+// strongly-typed TS module to src/params/schemaDerived.generated.ts.
+//
+// Run with: npm run regen-schema
+//
+// The schema lives at the repo root because this is a standalone repo (not a
+// subfolder of the workflow). To refresh from upstream, run `npm run
+// update-schema` which fetches the latest schema and regenerates this output
+// in one step.
+
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const schemaPath = resolve(here, '..', 'nextflow_schema.json');
+const outPath = resolve(here, '..', 'src', 'params', 'schemaDerived.generated.ts');
+
+type JsonSchemaNode = {
+  type?: string;
+  properties?: Record<string, JsonSchemaNode>;
+  enum?: unknown[];
+  default?: unknown;
+  hidden?: boolean;
+  minimum?: number;
+  maximum?: number;
+  anyOf?: JsonSchemaNode[];
+  items?: JsonSchemaNode;
+  additionalProperties?: unknown;
+};
+
+type Shape =
+  | { kind: 'string' | 'integer' | 'number' | 'boolean' }
+  | { kind: 'enum'; values: string[] }
+  | { kind: 'string-or-list' }
+  | { kind: 'string-or-list-or-map' };
+
+type Entry = {
+  path: string;
+  shape: Shape;
+  defaultValue: unknown;
+  hidden: boolean;
+  minimum?: number;
+  maximum?: number;
+};
+
+function isObjectWithProperties(node: JsonSchemaNode): boolean {
+  // An "object container" for our purposes is one with an explicit
+  // `properties` map. Objects that only carry `additionalProperties` (e.g.
+  // a free-form map of strings, used for output_directories) are treated as
+  // leaves so we don't try to walk them.
+  return node.type === 'object' && node.properties !== undefined;
+}
+
+function classifyShape(node: JsonSchemaNode): Shape {
+  // Enum first — enum takes precedence over plain string.
+  if (Array.isArray(node.enum) && node.enum.length > 0) {
+    return { kind: 'enum', values: node.enum.map(String) };
+  }
+
+  if (node.anyOf && node.anyOf.length > 0) {
+    const kinds = new Set<string>();
+    for (const branch of node.anyOf) {
+      if (branch.type) {
+        kinds.add(branch.type);
+      }
+    }
+    if (kinds.has('string') && kinds.has('array') && kinds.has('object')) {
+      return { kind: 'string-or-list-or-map' };
+    }
+    if (kinds.has('string') && kinds.has('array')) {
+      return { kind: 'string-or-list' };
+    }
+    // Fall through: pick a scalar if available.
+    if (kinds.has('string')) return { kind: 'string' };
+    if (kinds.has('integer')) return { kind: 'integer' };
+    if (kinds.has('number')) return { kind: 'number' };
+    if (kinds.has('boolean')) return { kind: 'boolean' };
+    throw new Error(`unrecognized anyOf shape: ${JSON.stringify(node.anyOf)}`);
+  }
+
+  // Top-level array (e.g. qc_report.report_format) — treat as string-or-list
+  // so the UI layer can pick a multi-enum/list widget without losing the
+  // enum constraint on items. Note: we do not synthesize an enum at the
+  // array level; the UI metadata layer can hard-code item enums.
+  if (node.type === 'array') {
+    return { kind: 'string-or-list' };
+  }
+
+  // Free-form object (additionalProperties only, no `properties`). The
+  // schema uses this for opaque maps such as output_directories. We retain
+  // it as a single leaf with a permissive shape so generation does not
+  // throw; it's always hidden in the schema and never surfaced in the UI.
+  if (node.type === 'object') {
+    return { kind: 'string-or-list-or-map' };
+  }
+
+  switch (node.type) {
+    case 'string':
+      return { kind: 'string' };
+    case 'integer':
+      return { kind: 'integer' };
+    case 'number':
+      return { kind: 'number' };
+    case 'boolean':
+      return { kind: 'boolean' };
+    default:
+      throw new Error(`unrecognized leaf type: ${JSON.stringify(node)}`);
+  }
+}
+
+function walk(prefix: string, node: JsonSchemaNode, inheritedHidden: boolean, out: Entry[]): void {
+  if (isObjectWithProperties(node)) {
+    const hidden = inheritedHidden || node.hidden === true;
+    const props = node.properties ?? {};
+    for (const rawKey of Object.keys(props)) {
+      const key = rawKey.trim(); // strip schema typos like 'score_threshold '
+      const child = props[rawKey]!;
+      const childPath = prefix ? `${prefix}.${key}` : key;
+      walk(childPath, child, hidden, out);
+    }
+    return;
+  }
+
+  const shape = classifyShape(node);
+  out.push({
+    path: prefix,
+    shape,
+    defaultValue: node.default ?? null,
+    hidden: inheritedHidden || node.hidden === true,
+    ...(node.minimum !== undefined ? { minimum: node.minimum } : {}),
+    ...(node.maximum !== undefined ? { maximum: node.maximum } : {}),
+  });
+}
+
+function emit(entries: Entry[]): string {
+  const lines: string[] = [];
+  lines.push('// AUTO-GENERATED by scripts/gen-param-metadata.ts. Do not edit.');
+  lines.push('// Run `npm run regen-schema` after schema changes.');
+  lines.push('');
+  lines.push("import type { SchemaDerivedEntry, SchemaDerivedMap } from './schemaTypes';");
+  lines.push('');
+  lines.push('export const schemaDerived: SchemaDerivedMap = {');
+  for (const entry of entries) {
+    const segments: string[] = [];
+    segments.push(`path: ${JSON.stringify(entry.path)}`);
+    segments.push(`shape: ${shapeLiteral(entry.shape)}`);
+    segments.push(`defaultValue: ${JSON.stringify(entry.defaultValue)}`);
+    segments.push(`hidden: ${entry.hidden}`);
+    if (entry.minimum !== undefined) segments.push(`minimum: ${entry.minimum}`);
+    if (entry.maximum !== undefined) segments.push(`maximum: ${entry.maximum}`);
+    lines.push(`  ${JSON.stringify(entry.path)}: { ${segments.join(', ')} } satisfies SchemaDerivedEntry,`);
+  }
+  lines.push('} as const;');
+  lines.push('');
+  lines.push('export const schemaPaths: readonly string[] = Object.freeze(Object.keys(schemaDerived));');
+  lines.push('');
+  return lines.join('\n');
+}
+
+function shapeLiteral(shape: Shape): string {
+  if (shape.kind === 'enum') {
+    return `{ kind: 'enum', values: ${JSON.stringify(shape.values)} as const }`;
+  }
+  return `{ kind: '${shape.kind}' }`;
+}
+
+const raw = readFileSync(schemaPath, 'utf8');
+const schema = JSON.parse(raw) as JsonSchemaNode;
+const entries: Entry[] = [];
+walk('', schema, false, entries);
+entries.sort((a, b) => a.path.localeCompare(b.path));
+
+const source = emit(entries);
+writeFileSync(outPath, source, 'utf8');
+const visible = entries.filter((e) => !e.hidden).length;
+const hidden = entries.length - visible;
+// eslint-disable-next-line no-console
+console.log(
+  `Wrote ${entries.length} schema entries (${visible} visible, ${hidden} hidden) to ${outPath}`,
+);
