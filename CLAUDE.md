@@ -75,17 +75,29 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── emitConfig.ts               pure: state → string
     │   └── __tests__/golden/*.config   golden output files (checked in)
     ├── components/
-    │   ├── layout/                     AppShell, SectionNav, FormPane
+    │   ├── layout/                     AppShell (hosts Preview/Workflow tabs), SectionNav, FormPane
     │   ├── form/                       Section, Field, FieldShell, HelpPopover,
     │   │                               AdvancedToggle, ValidationSummary
     │   ├── widgets/                    10 widgets — see "Widget catalog" below
     │   ├── preview/                    PreviewPane, GroovyHighlighter, PreviewActions
+    │   ├── workflow/                   WorkflowGraphPane, WorkflowGraphSvg (live DAG render)
     │   └── ModeToggle.tsx              top-of-form General/PDC mode selector
+    ├── workflow/
+    │   ├── types.ts                    GraphNode/GraphEdge/WorkflowGraph types
+    │   ├── computeWorkflowGraph.ts     pure: state → WorkflowGraph
+    │   └── layout.ts                   stage-banded (x, y) positioning + viewBox
     ├── hooks/                          useFieldValue, useValidation, useFormState
     └── lib/
         ├── download.ts, clipboard.ts
         └── formatDefault.ts            renders schema defaults for hints/placeholders
 ```
+
+`scripts/visual-check.mjs` (Playwright + chromium) seeds `localStorage` for ten
+form-state scenarios and screenshots both tabs. Used for visual smoke-checks
+when touching the workflow graph or layout. Run `npm run dev` first, then
+`node scripts/visual-check.mjs --port 5173`. Output PNGs land in `screenshots/`
+(gitignored). `scripts/click-check.mjs` is a smaller companion that exercises
+the click-to-focus behavior on input nodes.
 
 ## Architecture — the load-bearing concepts
 
@@ -223,7 +235,116 @@ a scenario: create a new `.config` file, add a test that constructs the
 matching state via `makeState({...})` and asserts equality with the file.
 Output is byte-stable when `version` and `timestamp` are passed as options.
 
-### 7. Widget catalog
+### 7. Workflow graph (live DAG visualization)
+
+The right column of the app exposes two tabs: **Config preview** (the Groovy
+override emitter, default tab) and **Workflow graph** (an SVG visualization
+of the Nextflow DAG that *would actually run* given the current form state).
+
+Architecture mirrors the emitter:
+
+- **`src/workflow/computeWorkflowGraph.ts`** — pure function
+  `(state: FormState) → WorkflowGraph`. **No React, no store, no DOM imports.**
+  Reads `state.values` and `state.mode` directly; **does NOT consult `state.touched`**
+  (the graph reflects the workflow that would run for the current values, not
+  what's been emitted to the config).
+- **`src/workflow/layout.ts`** — assigns `(x, y)` centers to nodes by re-indexing
+  used stages to a contiguous row sequence, returns viewBox dimensions.
+- **`src/components/workflow/WorkflowGraphSvg.tsx`** — hand-written SVG.
+  No `<canvas>`, no D3/Visx/ReactFlow. Process nodes are rounded rectangles;
+  file nodes are rectangles with a dog-ear cut (polygon path) in the top-right
+  corner to evoke a document.
+- **`src/components/workflow/WorkflowGraphPane.tsx`** — pane wrapper. Hugs
+  intrinsic content height (don't change to `h-full` — that reintroduces a
+  large empty whitespace gap below the graph since unlike PreviewPane the SVG
+  has a fixed natural height).
+- **`AppShell.tsx`** owns the active-tab state (`'preview' | 'workflow'`,
+  defaults to `'preview'`). The mobile show/hide toggle wraps the entire
+  tabbed area, preserving prior behavior.
+
+**Active-only graph**: only nodes that will actually run / be consumed are
+emitted. Unselected branches (the other search engines, FASTA in Cascadia
+mode, the user library when Carafe is supplying one, optional inputs the user
+hasn't filled) are omitted entirely — *not* faded. This keeps the graph
+focused on "what's about to run." There are only two node statuses:
+
+- `active` — process will execute / file is provided. Accent fill.
+- `required-missing` — user-supplied input that's needed but not set.
+  Same chrome as a filled file node, but the filename slot renders `?`
+  in red (`MISSING_LABEL_COLOR` in `WorkflowGraphSvg.tsx`). The descriptive
+  sublabel ("Spectra files", "FASTA database", etc.) is shown in its
+  normal position.
+
+**Skyline template special case**: the workflow uses a built-in default
+template if the user doesn't supply one, so the template node is always
+'active' when Skyline runs — labeled `Default template` when unset, the
+filename when set.
+
+**Click-to-focus**: input file nodes that carry a `formPath` are clickable
+(also keyboard-activatable via Enter/Space). A click scrolls the matching
+`#field-<path>` into view, focuses the first input within it, and briefly
+flashes the field's background (`.wf-field-flash` keyframes in
+`index.css`). Process and output nodes have no `formPath` and remain
+non-interactive. The Carafe-input node has a special fallback: when
+`carafe.source` is unset, its `formPath` is `'carafe.source'` itself
+(the source-selector dropdown) so the click always lands somewhere
+useful; once a source is picked, `formPath` switches to that source's
+specific value field.
+
+**Edge routing**: edges that span 2+ rows are routed with a cubic bezier
+that bows past the central column of intermediate nodes. The `apexX` is
+placed `APEX_CLEARANCE` (24px) outside the obstacle envelope; the
+control-point x is back-solved from `apexX` because for a cubic with
+both control points at the same x, the curve's midpoint sits only ~75%
+of the way out toward that x. Side selection picks whichever side
+minimizes total endpoint travel. If both endpoints already sit clearly
+to the same side of the obstacle, the curve falls back to a plain
+straight bezier (cleaner). Adjacent rows always use the simple bezier
+since there are no obstacles in between. **Don't replace this with
+orthogonal/Manhattan routing through side channels** — the user
+explicitly rejected that approach as "not natural" because the lines
+flowed out to the page edges and back in.
+
+**Conditional gating** is hand-coded in `computeWorkflowGraph.ts` against
+`state.values`. Do **not** try to reuse `requiredWhen` from `paramMetadata.ts`
+— the form's "required" semantics differ from the workflow's. If the workflow
+adds a new conditional process, edit `computeWorkflowGraph.ts` and add a
+matching scenario test in `__tests__/computeWorkflowGraph.test.ts`.
+
+**Sub-process granularity** — the graph models conditional sub-processes that
+actually fire, not just top-level branches:
+- `Convert to mzML` (msconvert) appears only when RAW files are present AND
+  not (`search_engine == 'diann'` AND `use_vendor_raw == true`). Carafe spectra
+  always trigger msconvert for RAW (Carafe ignores `use_vendor_raw`).
+- `Extract Bruker` (unzip) appears only when `.d.zip` files are present.
+  EncyclopeDIA/Cascadia don't accept `.d.zip` so the node is suppressed for
+  them.
+- `Predict library (DIA-NN)` appears only when DIA-NN runs without a
+  user library and without Carafe.
+- `Convert .blib → .dlib` and `Convert .dlib → TSV` appear when the user's
+  library file extension forces them.
+- Narrow-window pre-search (`Build chrom. library` for EncyclopeDIA, or
+  `DIA-NN narrow search`) appears when `chromatogram_library_spectra_dir` is
+  set and the engine supports it (Cascadia ignores it).
+- `Annotate doc` appears when replicate metadata is set or in PDC mode.
+- `Minimize doc` appears only when `skyline.minimize == true`.
+
+File types are inferred from spectra paths' extensions (`.raw`, `.mzML`,
+`.d.zip`); when types can't be determined (directory without glob) the
+detector returns `uncertain` which conservatively triggers msconvert.
+
+**Carafe override**: when `use_carafe === true`, the user spectral-library
+input node is omitted entirely (Carafe overrides `params.spectral_library`
+in the workflow with a warning). The library-consuming process gets its
+edge from the Carafe-generated library output instead.
+
+**Rendering rules to keep in mind**:
+- Edges are filtered against the final node set; a "edge integrity" test
+  guards this. Don't emit dangling edges.
+- All SVG hand-written. Adding a chart library would violate the no-UI-libs
+  rule and add weight that hand-rolled paths don't need.
+
+### 8. Widget catalog
 
 Each widget is a memoized React component receiving `WidgetProps`:
 
@@ -261,7 +382,11 @@ so the coverage test sees them as accounted for.
 7. **All emit output is byte-stable** given fixed `version` + `timestamp`
    options. Don't introduce nondeterminism (Sets, Map iteration, etc.) in
    the emit pipeline.
-8. **Bundle budget**: keep gzipped JS under ~150 KB. Currently ~82 KB.
+8. **Be efficient with the bundle.** No fixed size ceiling, but don't add
+   bloat: prefer hand-rolled SVG / small utilities over heavy npm
+   dependencies, especially UI/chart libraries. Run `npm run build` after
+   adding a dependency and check the gzipped JS line — a sudden jump of
+   tens of KB warrants justification.
 9. **Schema lives at the repo root** (`./nextflow_schema.json`), not at
    `../nextflow_schema.json` — this repo is standalone, not a subfolder.
 
@@ -399,11 +524,12 @@ When you add an `alwaysEmit` field:
 | `requiredWhen` predicates            | YES     | They drive visible required markers  |
 | Metadata coverage gate               | YES     | Highest-leverage drift detector      |
 | Trickiest widgets (BatchMap, ModeToggle, GlobRegexPair, SpectraSourceRadio) | YES | Hand-tested interactions |
+| `computeWorkflowGraph` scenarios     | YES     | Each conditional gate has a test     |
 | Full form snapshots                  | NO      | High churn, low signal               |
 | Zustand store internals              | LIGHT   | Smoke + mode-switch behavior         |
-| Visual regression                    | NO      | Out of scope                         |
+| Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **237 tests across 16 files**. Run `npm test` before pushing.
+Current count: **282 tests across 17 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
