@@ -136,9 +136,9 @@ function WorkflowNodeShape({
       )}
       <text
         x={node.x}
-        y={node.sublabel ? node.y - 2 : node.y + 4}
+        y={node.sublabel ? node.y - 3 : node.y + 5}
         textAnchor="middle"
-        fontSize={12}
+        fontSize={14}
         fontWeight={600}
         fill={labelColor}
       >
@@ -149,7 +149,7 @@ function WorkflowNodeShape({
           x={node.x}
           y={node.y + 14}
           textAnchor="middle"
-          fontSize={10}
+          fontSize={12}
           fill={style.subTextColor}
         >
           {node.sublabel}

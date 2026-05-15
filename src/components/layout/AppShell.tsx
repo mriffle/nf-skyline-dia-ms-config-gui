@@ -35,7 +35,7 @@ export function AppShell() {
   return (
     <div className="flex min-h-full flex-col bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+        <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div>
             <h1 className="text-base font-semibold tracking-tight text-slate-900">
               nf-skyline-dia-ms config builder
@@ -71,17 +71,17 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6">
+      <main className="mx-auto w-full max-w-screen-2xl flex-1 px-4 py-8 sm:px-6">
         <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
           <div className="w-full lg:w-56 lg:shrink-0">
             <SectionNav />
           </div>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 lg:max-w-[31rem]">
             <FormPane />
           </div>
           <div
             className={[
-              'w-full lg:sticky lg:top-6 lg:w-[28rem] lg:shrink-0',
+              'w-full lg:sticky lg:top-6 lg:min-w-[28rem] lg:flex-1',
               showPreview ? 'block' : 'hidden lg:block',
             ].join(' ')}
           >
@@ -122,7 +122,7 @@ export function AppShell() {
       </main>
 
       <footer className="border-t border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-3 text-[12px] text-slate-500 sm:px-6">
+        <div className="mx-auto max-w-screen-2xl px-4 py-3 text-[12px] text-slate-500 sm:px-6">
           v{__APP_VERSION__}
         </div>
       </footer>
