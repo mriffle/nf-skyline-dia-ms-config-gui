@@ -1,17 +1,23 @@
 // Page chrome: top header (title + reset), three-column body
-// (nav | form | preview-placeholder), footer with version.
+// (nav | form | preview-or-graph), footer with version. The right column
+// switches between the Groovy config preview and the workflow graph via a
+// small tab strip.
 
 import { useState } from 'react';
 import { STORAGE_KEY, useStore } from '../../state/store';
 import { SectionNav } from './SectionNav';
 import { FormPane } from './FormPane';
 import { PreviewPane } from '../preview/PreviewPane';
+import { WorkflowGraphPane } from '../workflow/WorkflowGraphPane';
 
 declare const __APP_VERSION__: string;
+
+type RightTab = 'preview' | 'graph';
 
 export function AppShell() {
   const reset = useStore((s) => s.reset);
   const [showPreview, setShowPreview] = useState(false);
+  const [activeTab, setActiveTab] = useState<RightTab>('preview');
 
   const onReset = (): void => {
     const ok = window.confirm(
@@ -79,7 +85,38 @@ export function AppShell() {
               showPreview ? 'block' : 'hidden lg:block',
             ].join(' ')}
           >
-            <PreviewPane />
+            <div className="flex flex-col gap-2">
+              <div role="tablist" aria-label="Right pane" className="flex items-center gap-1">
+                <TabButton
+                  isActive={activeTab === 'preview'}
+                  onClick={() => setActiveTab('preview')}
+                  controls="right-pane-preview"
+                >
+                  Config preview
+                </TabButton>
+                <TabButton
+                  isActive={activeTab === 'graph'}
+                  onClick={() => setActiveTab('graph')}
+                  controls="right-pane-graph"
+                >
+                  Workflow graph
+                </TabButton>
+              </div>
+              <div
+                id="right-pane-preview"
+                role="tabpanel"
+                hidden={activeTab !== 'preview'}
+              >
+                {activeTab === 'preview' ? <PreviewPane /> : null}
+              </div>
+              <div
+                id="right-pane-graph"
+                role="tabpanel"
+                hidden={activeTab !== 'graph'}
+              >
+                {activeTab === 'graph' ? <WorkflowGraphPane /> : null}
+              </div>
+            </div>
           </div>
         </div>
       </main>
@@ -90,5 +127,32 @@ export function AppShell() {
         </div>
       </footer>
     </div>
+  );
+}
+
+interface TabButtonProps {
+  readonly isActive: boolean;
+  readonly onClick: () => void;
+  readonly controls: string;
+  readonly children: React.ReactNode;
+}
+
+function TabButton({ isActive, onClick, controls, children }: TabButtonProps) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={isActive}
+      aria-controls={controls}
+      onClick={onClick}
+      className={[
+        'rounded-md border px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-accent-500',
+        isActive
+          ? 'border-accent-500 bg-accent-500 text-white'
+          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
+      ].join(' ')}
+    >
+      {children}
+    </button>
   );
 }

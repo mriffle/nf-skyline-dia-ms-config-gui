@@ -75,17 +75,28 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── emitConfig.ts               pure: state → string
     │   └── __tests__/golden/*.config   golden output files (checked in)
     ├── components/
-    │   ├── layout/                     AppShell, SectionNav, FormPane
+    │   ├── layout/                     AppShell (hosts Preview/Workflow tabs), SectionNav, FormPane
     │   ├── form/                       Section, Field, FieldShell, HelpPopover,
     │   │                               AdvancedToggle, ValidationSummary
     │   ├── widgets/                    10 widgets — see "Widget catalog" below
     │   ├── preview/                    PreviewPane, GroovyHighlighter, PreviewActions
+    │   ├── workflow/                   WorkflowGraphPane, WorkflowGraphSvg (live DAG render)
     │   └── ModeToggle.tsx              top-of-form General/PDC mode selector
+    ├── workflow/
+    │   ├── types.ts                    GraphNode/GraphEdge/WorkflowGraph types
+    │   ├── computeWorkflowGraph.ts     pure: state → WorkflowGraph
+    │   └── layout.ts                   stage-banded (x, y) positioning + viewBox
     ├── hooks/                          useFieldValue, useValidation, useFormState
     └── lib/
         ├── download.ts, clipboard.ts
         └── formatDefault.ts            renders schema defaults for hints/placeholders
 ```
+
+`scripts/visual-check.mjs` (Playwright + chromium) seeds `localStorage` for ten
+form-state scenarios and screenshots both tabs. Used for visual smoke-checks
+when touching the workflow graph or layout. Run `npm run dev` first, then
+`node scripts/visual-check.mjs --port 5173`. Output PNGs land in `screenshots/`
+(gitignored).
 
 ## Architecture — the load-bearing concepts
 
@@ -223,7 +234,60 @@ a scenario: create a new `.config` file, add a test that constructs the
 matching state via `makeState({...})` and asserts equality with the file.
 Output is byte-stable when `version` and `timestamp` are passed as options.
 
-### 7. Widget catalog
+### 7. Workflow graph (live DAG visualization)
+
+The right column of the app exposes two tabs: **Config preview** (the Groovy
+override emitter, default tab) and **Workflow graph** (an SVG visualization
+of the Nextflow DAG that *would actually run* given the current form state).
+
+Architecture mirrors the emitter:
+
+- **`src/workflow/computeWorkflowGraph.ts`** — pure function
+  `(state: FormState) → WorkflowGraph`. **No React, no store, no DOM imports.**
+  Reads `state.values` and `state.mode` directly; **does NOT consult `state.touched`**
+  (the graph reflects the workflow that would run for the current values, not
+  what's been emitted to the config).
+- **`src/workflow/layout.ts`** — assigns `(x, y)` centers to nodes by re-indexing
+  used stages to a contiguous row sequence, returns viewBox dimensions.
+- **`src/components/workflow/WorkflowGraphSvg.tsx`** — hand-written SVG.
+  No `<canvas>`, no D3/Visx/ReactFlow. Process nodes are rounded rectangles;
+  file nodes are rectangles with a dog-ear cut (polygon path) in the top-right
+  corner to evoke a document.
+- **`src/components/workflow/WorkflowGraphPane.tsx`** — pane wrapper. Hugs
+  intrinsic content height (don't change to `h-full` — that reintroduces a
+  large empty whitespace gap below the graph since unlike PreviewPane the SVG
+  has a fixed natural height).
+- **`AppShell.tsx`** owns the active-tab state (`'preview' | 'workflow'`,
+  defaults to `'preview'`). The mobile show/hide toggle wraps the entire
+  tabbed area, preserving prior behavior.
+
+**Node statuses** (drive color/border):
+- `active` — process will execute / file is provided. Accent fill.
+- `inactive` — node lives in an unselected branch (e.g. EncyclopeDIA when
+  DIA-NN is selected). Slate, faded but readable.
+- `required-missing` — user-supplied input that's needed but not set.
+  Red dashed border, big `?` label.
+- `optional-missing` — user-supplied input that's optional and not set.
+  Slate dotted border.
+
+**Conditional gating** is hand-coded in `computeWorkflowGraph.ts` against
+`state.values`. Do **not** try to reuse `requiredWhen` from `paramMetadata.ts`
+— the form's "required" semantics differ from the workflow's. If the workflow
+adds a new conditional process, edit `computeWorkflowGraph.ts` and add a
+matching scenario test in `__tests__/computeWorkflowGraph.test.ts`.
+
+**Carafe override**: when `use_carafe === true`, the user spectral-library
+input node is omitted entirely (Carafe overrides `params.spectral_library`
+in the workflow with a warning). The library-consuming process gets its
+edge from the Carafe-generated library output instead.
+
+**Rendering rules to keep in mind**:
+- Edges are filtered against the final node set; a "edge integrity" test
+  guards this. Don't emit dangling edges.
+- All SVG hand-written. Adding a chart library would blow the bundle budget
+  and violate the no-UI-libs rule.
+
+### 8. Widget catalog
 
 Each widget is a memoized React component receiving `WidgetProps`:
 
@@ -261,7 +325,7 @@ so the coverage test sees them as accounted for.
 7. **All emit output is byte-stable** given fixed `version` + `timestamp`
    options. Don't introduce nondeterminism (Sets, Map iteration, etc.) in
    the emit pipeline.
-8. **Bundle budget**: keep gzipped JS under ~150 KB. Currently ~82 KB.
+8. **Bundle budget**: keep gzipped JS under ~150 KB. Currently ~86 KB.
 9. **Schema lives at the repo root** (`./nextflow_schema.json`), not at
    `../nextflow_schema.json` — this repo is standalone, not a subfolder.
 
@@ -399,11 +463,12 @@ When you add an `alwaysEmit` field:
 | `requiredWhen` predicates            | YES     | They drive visible required markers  |
 | Metadata coverage gate               | YES     | Highest-leverage drift detector      |
 | Trickiest widgets (BatchMap, ModeToggle, GlobRegexPair, SpectraSourceRadio) | YES | Hand-tested interactions |
+| `computeWorkflowGraph` scenarios     | YES     | Each conditional gate has a test     |
 | Full form snapshots                  | NO      | High churn, low signal               |
 | Zustand store internals              | LIGHT   | Smoke + mode-switch behavior         |
-| Visual regression                    | NO      | Out of scope                         |
+| Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **237 tests across 16 files**. Run `npm test` before pushing.
+Current count: **259 tests across 17 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
