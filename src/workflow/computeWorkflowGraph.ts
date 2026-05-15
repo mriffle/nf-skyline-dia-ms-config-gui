@@ -417,7 +417,9 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
   if (carafe && !msconvertOnly) {
     const source = state.values['carafe.source'];
     let slot: FileSlot = { filled: false, label: '?' };
-    let formPath: string | undefined;
+    // Prefer the specific source-value field when source is set; fall back
+    // to the source-selector field so the node is always clickable.
+    let formPath: string = 'carafe.source';
     if (source === 'file') {
       slot = summarizeStringPath(state.values['carafe.spectra_file']);
       formPath = 'carafe.spectra_file';

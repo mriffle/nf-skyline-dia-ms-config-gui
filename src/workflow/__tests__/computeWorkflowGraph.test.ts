@@ -531,6 +531,18 @@ describe('computeWorkflowGraph — Carafe enabled', () => {
     );
     expect(nodeById(g, 'input.carafe-spectra')?.status).toBe('required-missing');
   });
+
+  it('Carafe input formPath falls back to carafe.source when source unset', () => {
+    const g = computeWorkflowGraph(makeState({ values: { use_carafe: true } }));
+    expect(nodeById(g, 'input.carafe-spectra')?.formPath).toBe('carafe.source');
+  });
+
+  it('Carafe input formPath points to specific value field when source is set', () => {
+    const g = computeWorkflowGraph(
+      makeState({ values: { use_carafe: true, 'carafe.source': 'dir' } }),
+    );
+    expect(nodeById(g, 'input.carafe-spectra')?.formPath).toBe('carafe.spectra_dir');
+  });
 });
 
 // ---------------------------------------------------------------------------
