@@ -32,19 +32,20 @@ function hasEdge(g: WorkflowGraph, from: string, to: string): boolean {
 }
 
 describe('computeWorkflowGraph — empty initial state (general mode)', () => {
-  // The default state pre-seeds use_carafe = true, so empty initial state
-  // also requires Carafe input.
   it('spectra is required-missing and FASTA is required-missing', () => {
     const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
     expect(nodeById(g, 'input.spectra')?.status).toBe('required-missing');
     expect(nodeById(g, 'input.fasta')?.status).toBe('required-missing');
   });
 
-  it('all three search engine processes are present; only DIA-NN is active', () => {
+  it('only the selected DIA-NN engine appears; other engines are omitted', () => {
     const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
     expect(nodeById(g, 'process.diann')?.status).toBe('active');
-    expect(nodeById(g, 'process.encyclopedia')?.status).toBe('inactive');
-    expect(nodeById(g, 'process.cascadia')?.status).toBe('inactive');
+    expect(nodeById(g, 'process.encyclopedia')).toBeUndefined();
+    expect(nodeById(g, 'process.cascadia')).toBeUndefined();
+    expect(nodeById(g, 'output.encyclopedia-results')).toBeUndefined();
+    expect(nodeById(g, 'output.cascadia-results')).toBeUndefined();
+    expect(nodeById(g, 'output.cascadia-fasta')).toBeUndefined();
   });
 
   it('always includes prepare-spectra, prepared-spectra output, and Skyline build', () => {
@@ -52,6 +53,13 @@ describe('computeWorkflowGraph — empty initial state (general mode)', () => {
     expect(nodeById(g, 'process.prepare-spectra')).toBeDefined();
     expect(nodeById(g, 'output.prepared-spectra')).toBeDefined();
     expect(nodeById(g, 'process.skyline')).toBeDefined();
+  });
+
+  it('Skyline template appears as active with "Default template" label when unset', () => {
+    const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
+    const tmpl = nodeById(g, 'input.skyline-template');
+    expect(tmpl?.status).toBe('active');
+    expect(tmpl?.label).toBe('Default template');
   });
 });
 
@@ -70,7 +78,7 @@ describe('computeWorkflowGraph — DIA-NN scenarios', () => {
     expect(nodeById(g, 'input.spectra')?.status).toBe('active');
   });
 
-  it('library is optional-missing for DIA-NN (not required)', () => {
+  it('library is omitted entirely for DIA-NN when unset (it is optional)', () => {
     const g = computeWorkflowGraph(
       makeState({
         values: {
@@ -80,30 +88,44 @@ describe('computeWorkflowGraph — DIA-NN scenarios', () => {
         },
       }),
     );
-    expect(nodeById(g, 'input.library')?.status).toBe('optional-missing');
+    expect(nodeById(g, 'input.library')).toBeUndefined();
+  });
+
+  it('library appears as active for DIA-NN when user has set one', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          spectral_library: '/libs/human.dlib',
+        },
+      }),
+    );
+    expect(nodeById(g, 'input.library')?.status).toBe('active');
   });
 });
 
 describe('computeWorkflowGraph — EncyclopeDIA selected', () => {
-  it('library flips to required-missing; encyclopedia process active, diann inactive', () => {
+  it('library required-missing; only encyclopedia process present', () => {
     const g = computeWorkflowGraph(
       makeState({ values: { use_carafe: false, search_engine: 'encyclopedia' } }),
     );
     expect(nodeById(g, 'input.library')?.status).toBe('required-missing');
     expect(nodeById(g, 'process.encyclopedia')?.status).toBe('active');
-    expect(nodeById(g, 'process.diann')?.status).toBe('inactive');
-    expect(nodeById(g, 'process.cascadia')?.status).toBe('inactive');
+    expect(nodeById(g, 'process.diann')).toBeUndefined();
+    expect(nodeById(g, 'process.cascadia')).toBeUndefined();
   });
 });
 
 describe('computeWorkflowGraph — Cascadia selected', () => {
-  it('FASTA optional, library inactive, Cascadia active, generated FASTA appears', () => {
+  it('FASTA hidden, library hidden, only Cascadia present, generated FASTA output present', () => {
     const g = computeWorkflowGraph(
       makeState({ values: { use_carafe: false, search_engine: 'cascadia' } }),
     );
-    expect(nodeById(g, 'input.fasta')?.status).toBe('optional-missing');
-    expect(nodeById(g, 'input.library')?.status).toBe('inactive');
+    expect(nodeById(g, 'input.fasta')).toBeUndefined();
+    expect(nodeById(g, 'input.library')).toBeUndefined();
     expect(nodeById(g, 'process.cascadia')?.status).toBe('active');
+    expect(nodeById(g, 'process.diann')).toBeUndefined();
+    expect(nodeById(g, 'process.encyclopedia')).toBeUndefined();
     expect(nodeById(g, 'output.cascadia-fasta')?.status).toBe('active');
   });
 
@@ -133,7 +155,7 @@ describe('computeWorkflowGraph — PDC mode', () => {
 });
 
 describe('computeWorkflowGraph — Carafe enabled', () => {
-  it('Carafe process and input nodes appear; generated library replaces user library edge', () => {
+  it('Carafe process and input nodes appear; user-library node is omitted', () => {
     const g = computeWorkflowGraph(
       makeState({
         values: {
@@ -145,8 +167,8 @@ describe('computeWorkflowGraph — Carafe enabled', () => {
     expect(nodeById(g, 'process.carafe')?.status).toBe('active');
     expect(nodeById(g, 'input.carafe-spectra')?.status).toBe('required-missing');
     expect(nodeById(g, 'output.carafe-library')?.status).toBe('active');
+    expect(nodeById(g, 'input.library')).toBeUndefined();
     expect(hasEdge(g, 'output.carafe-library', 'process.diann')).toBe(true);
-    expect(hasEdge(g, 'input.library', 'process.diann')).toBe(false);
   });
 
   it('Carafe input becomes active when source=file and spectra_file set', () => {
@@ -161,31 +183,40 @@ describe('computeWorkflowGraph — Carafe enabled', () => {
     );
     expect(nodeById(g, 'input.carafe-spectra')?.status).toBe('active');
   });
+});
 
-  it('omits the user spectral library node entirely when Carafe is enabled', () => {
+describe('computeWorkflowGraph — replicate metadata', () => {
+  it('hidden when unset', () => {
+    const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
+    expect(nodeById(g, 'input.replicate-metadata')).toBeUndefined();
+  });
+
+  it('appears as active when set', () => {
     const g = computeWorkflowGraph(
-      makeState({
-        values: {
-          use_carafe: true,
-          'carafe.source': 'file',
-          'carafe.spectra_file': '/data/dda.mzML',
-        },
-      }),
+      makeState({ values: { use_carafe: false, replicate_metadata: '/meta.tsv' } }),
     );
-    // User library is overridden by the Carafe-generated library at runtime,
-    // so showing the user-library slot would be misleading.
-    expect(nodeById(g, 'input.library')).toBeUndefined();
-    // The Carafe pipeline + generated library output should still be present.
-    expect(nodeById(g, 'input.carafe-spectra')).toBeDefined();
-    expect(nodeById(g, 'process.carafe')).toBeDefined();
-    expect(nodeById(g, 'output.carafe-library')).toBeDefined();
-    // No edge should reference the missing user-library node.
-    expect(g.edges.some((e) => e.from === 'input.library' || e.to === 'input.library')).toBe(false);
+    expect(nodeById(g, 'input.replicate-metadata')?.status).toBe('active');
+  });
+});
+
+describe('computeWorkflowGraph — skyr report definitions', () => {
+  it('skyr input and Skyline-reports process are both hidden when skyr unset', () => {
+    const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
+    expect(nodeById(g, 'input.skyr')).toBeUndefined();
+    expect(nodeById(g, 'process.skyline-reports')).toBeUndefined();
+  });
+
+  it('both appear when skyr is set', () => {
+    const g = computeWorkflowGraph(
+      makeState({ values: { use_carafe: false, 'skyline.skyr_file': '/r.skyr' } }),
+    );
+    expect(nodeById(g, 'input.skyr')?.status).toBe('active');
+    expect(nodeById(g, 'process.skyline-reports')?.status).toBe('active');
   });
 });
 
 describe('computeWorkflowGraph — msconvert_only', () => {
-  it('only spectra → prepare → prepared-spectra remain; search/Skyline gone', () => {
+  it('only spectra → prepare → prepared-spectra remain; everything else gone', () => {
     const g = computeWorkflowGraph(
       makeState({
         values: {
@@ -197,16 +228,14 @@ describe('computeWorkflowGraph — msconvert_only', () => {
     expect(nodeById(g, 'input.spectra')?.status).toBe('active');
     expect(nodeById(g, 'process.prepare-spectra')?.status).toBe('active');
     expect(nodeById(g, 'output.prepared-spectra')?.status).toBe('active');
+    expect(nodeById(g, 'input.fasta')).toBeUndefined();
+    expect(nodeById(g, 'input.library')).toBeUndefined();
+    expect(nodeById(g, 'input.skyline-template')).toBeUndefined();
     expect(nodeById(g, 'process.diann')).toBeUndefined();
     expect(nodeById(g, 'process.encyclopedia')).toBeUndefined();
     expect(nodeById(g, 'process.cascadia')).toBeUndefined();
     expect(nodeById(g, 'process.skyline')).toBeUndefined();
     expect(nodeById(g, 'process.qc-report')).toBeUndefined();
-  });
-
-  it('FASTA is shown but not required in msconvert-only mode', () => {
-    const g = computeWorkflowGraph(makeState({ values: { msconvert_only: true } }));
-    expect(nodeById(g, 'input.fasta')?.status).toBe('inactive');
   });
 
   it('panorama upload still attaches when enabled', () => {
@@ -219,7 +248,7 @@ describe('computeWorkflowGraph — msconvert_only', () => {
 });
 
 describe('computeWorkflowGraph — skyline.skip', () => {
-  it('removes Skyline document and all reports', () => {
+  it('removes Skyline document, all reports, and Skyline-only inputs', () => {
     const g = computeWorkflowGraph(
       makeState({ values: { use_carafe: false, 'skyline.skip': true } }),
     );
@@ -228,14 +257,9 @@ describe('computeWorkflowGraph — skyline.skip', () => {
     expect(nodeById(g, 'process.qc-report')).toBeUndefined();
     expect(nodeById(g, 'process.batch-report')).toBeUndefined();
     expect(nodeById(g, 'process.skyline-reports')).toBeUndefined();
-  });
-
-  it('hides skyline template and skyr input nodes', () => {
-    const g = computeWorkflowGraph(
-      makeState({ values: { use_carafe: false, 'skyline.skip': true } }),
-    );
     expect(nodeById(g, 'input.skyline-template')).toBeUndefined();
     expect(nodeById(g, 'input.skyr')).toBeUndefined();
+    expect(nodeById(g, 'input.replicate-metadata')).toBeUndefined();
   });
 });
 
@@ -275,6 +299,26 @@ describe('computeWorkflowGraph — narrow-window spectra', () => {
   it('hidden when not set', () => {
     const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
     expect(nodeById(g, 'input.narrow')).toBeUndefined();
+  });
+});
+
+describe('computeWorkflowGraph — node-status invariant', () => {
+  it('every node is either "active" or "required-missing"', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: true,
+          'carafe.source': 'dir',
+          'carafe.spectra_dir': '/dda',
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+          'panorama.upload': true,
+        },
+      }),
+    );
+    for (const n of g.nodes) {
+      expect(['active', 'required-missing']).toContain(n.status);
+    }
   });
 });
 

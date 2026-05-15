@@ -5,12 +5,15 @@
 // graph reflects the workflow that *would run* for the current values,
 // regardless of whether the user has touched the underlying paths.
 //
-// The DAG's stage numbering, node IDs, and conditional gates follow the
-// authoritative spec in CLAUDE.md / the issue. Treat this file as the
-// single place where workflow topology lives.
+// Only nodes that will actually execute (or files that will actually be
+// consumed/produced) appear in the graph. Unselected branches — e.g. the
+// other search engines when DIA-NN is selected, the user spectral library
+// when Carafe is supplying one, FASTA in Cascadia mode — are omitted
+// entirely. Required-but-missing user inputs still appear (with red `?`)
+// so the user can see what's needed.
 
 import type { FormState } from '../params/paramMetadata';
-import type { GraphEdge, GraphNode, NodeStatus, WorkflowGraph } from './types';
+import type { GraphEdge, GraphNode, WorkflowGraph } from './types';
 
 // ---------------------------------------------------------------------------
 // Value helpers
@@ -33,14 +36,12 @@ const basenameOf = (s: string): string => {
 const truncate = (s: string, max = 28): string =>
   s.length > max ? `${s.slice(0, max - 1)}…` : s;
 
-// quant_spectra_dir is a tagged union: { kind: 'single' | 'list' | 'batch-map', ... }
-interface QuantSpectraSummary {
+interface FileSlot {
   readonly filled: boolean;
   readonly label: string;
-  readonly sublabel?: string;
 }
 
-function summarizeQuantSpectra(value: unknown): QuantSpectraSummary {
+function summarizeQuantSpectra(value: unknown): FileSlot {
   if (value === null || typeof value !== 'object') {
     return { filled: false, label: '?' };
   }
@@ -64,12 +65,6 @@ function summarizeQuantSpectra(value: unknown): QuantSpectraSummary {
     return { filled: true, label: `${valid.length} batch${valid.length === 1 ? '' : 'es'}` };
   }
   return { filled: false, label: '?' };
-}
-
-interface FileSlot {
-  readonly filled: boolean;
-  readonly label: string;
-  readonly sublabel?: string;
 }
 
 function summarizeStringPath(value: unknown): FileSlot {
@@ -131,12 +126,6 @@ function addEdge(g: MutableGraph, from: string, to: string): void {
   g.edges.push({ from, to });
 }
 
-function fileStatus(slot: FileSlot, required: boolean, active = true): NodeStatus {
-  if (!active) return 'inactive';
-  if (slot.filled) return 'active';
-  return required ? 'required-missing' : 'optional-missing';
-}
-
 export function computeWorkflowGraph(state: FormState): WorkflowGraph {
   const g: MutableGraph = { nodes: [], edges: [] };
   const engine = readSearchEngine(state);
@@ -149,10 +138,10 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
   const isPdc = state.mode === 'pdc';
 
   // -----------------------------------------------------------------
-  // Stage 0 — User-supplied input files
+  // Stage 0 — User-supplied input files (only those that will be used)
   // -----------------------------------------------------------------
 
-  // Spectra source
+  // Spectra source — always required.
   if (isPdc) {
     const studyId = state.values['pdc.study_id'];
     const filled = isNonEmptyString(studyId);
@@ -178,60 +167,61 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
     });
   }
 
-  // FASTA — required for diann/encyclopedia/no-search; optional for cascadia;
-  // not relevant for msconvert_only.
-  const fastaSlot = summarizeStringPath(state.values['fasta']);
-  const fastaActive = !msconvertOnly;
-  const fastaRequired =
-    !msconvertOnly && (engine === 'diann' || engine === 'encyclopedia' || engine === null);
-  addNode(g, {
-    id: 'input.fasta',
-    kind: 'input-file',
-    label: fastaSlot.filled ? fastaSlot.label : fastaActive ? '?' : 'FASTA',
-    sublabel: 'FASTA database',
-    status: fileStatus(fastaSlot, fastaRequired, fastaActive),
-    stage: 0,
-    formPath: 'fasta',
-  });
+  // FASTA — needed for diann/encyclopedia/no-search. Hidden in Cascadia
+  // (de novo) and in msconvert-only (no search runs).
+  const fastaRelevant = !msconvertOnly && engine !== 'cascadia';
+  if (fastaRelevant) {
+    const slot = summarizeStringPath(state.values['fasta']);
+    addNode(g, {
+      id: 'input.fasta',
+      kind: 'input-file',
+      label: slot.filled ? slot.label : '?',
+      sublabel: 'FASTA database',
+      status: slot.filled ? 'active' : 'required-missing',
+      stage: 0,
+      formPath: 'fasta',
+    });
+  }
 
-  // Spectral library — required for encyclopedia (when no carafe) or no-search.
-  // Optional for diann, ignored for cascadia or msconvert_only.
-  // When Carafe is enabled, the workflow overrides params.spectral_library
-  // with the Carafe-generated library, so the user-supplied library slot is
-  // omitted entirely from the graph to avoid implying it's needed.
+  // Spectral library — hidden when Carafe is supplying one, when Cascadia
+  // is ignoring libraries, or in msconvert-only. For DIA-NN the library is
+  // optional (can be predicted from FASTA): only shown if the user has
+  // actually set one. For EncyclopeDIA / no-search the library is required:
+  // always shown (red `?` if unset).
   const librarySlot = summarizeStringPath(state.values['spectral_library']);
-  const libraryActive = !msconvertOnly && engine !== 'cascadia';
-  const libraryRequired =
-    libraryActive &&
-    !carafe &&
-    (engine === 'encyclopedia' || engine === null);
-  if (!carafe) {
+  const libraryRelevant = !msconvertOnly && engine !== 'cascadia' && !carafe;
+  const libraryRequired = engine === 'encyclopedia' || engine === null;
+  if (libraryRelevant && (librarySlot.filled || libraryRequired)) {
     addNode(g, {
       id: 'input.library',
       kind: 'input-file',
-      label: librarySlot.filled ? librarySlot.label : libraryActive ? '?' : 'Library',
+      label: librarySlot.filled ? librarySlot.label : '?',
       sublabel: 'Spectral library',
-      status: fileStatus(librarySlot, libraryRequired, libraryActive),
+      status: librarySlot.filled ? 'active' : 'required-missing',
       stage: 0,
       formPath: 'spectral_library',
     });
   }
 
-  // Replicate metadata — general mode only, optional.
-  if (!isPdc && !msconvertOnly) {
+  // Replicate metadata — optional, general mode only. Only shown when set.
+  if (!isPdc && !msconvertOnly && !skylineSkip) {
     const slot = summarizeStringPath(state.values['replicate_metadata']);
-    addNode(g, {
-      id: 'input.replicate-metadata',
-      kind: 'input-file',
-      label: slot.filled ? slot.label : 'Metadata',
-      sublabel: 'Replicate metadata',
-      status: fileStatus(slot, false, true),
-      stage: 0,
-      formPath: 'replicate_metadata',
-    });
+    if (slot.filled) {
+      addNode(g, {
+        id: 'input.replicate-metadata',
+        kind: 'input-file',
+        label: slot.label,
+        sublabel: 'Replicate metadata',
+        status: 'active',
+        stage: 0,
+        formPath: 'replicate_metadata',
+      });
+    }
   }
 
-  // Skyline template — only when skyline runs. Optional (has default).
+  // Skyline template — the workflow uses a built-in default when unset, so
+  // it's always "active" (a template is always being used). Label switches
+  // between the user file and "Default template".
   if (!skylineSkip && !msconvertOnly) {
     const slot = summarizeStringPath(state.values['skyline.template_file']);
     addNode(g, {
@@ -239,28 +229,29 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       kind: 'input-file',
       label: slot.filled ? slot.label : 'Default template',
       sublabel: 'Skyline template',
-      status: slot.filled ? 'active' : 'optional-missing',
+      status: 'active',
       stage: 0,
       formPath: 'skyline.template_file',
     });
   }
 
-  // Skyr report definitions — only relevant when skyline runs. Optional.
-  if (!skylineSkip && !msconvertOnly) {
-    const slot = summarizeStringPath(state.values['skyline.skyr_file']);
+  // Skyr report definitions — optional. Only shown when set; the Skyline
+  // reports process is also gated on this being set.
+  const skyrSlot = summarizeStringPath(state.values['skyline.skyr_file']);
+  const skyrFilled = skyrSlot.filled;
+  if (!skylineSkip && !msconvertOnly && skyrFilled) {
     addNode(g, {
       id: 'input.skyr',
       kind: 'input-file',
-      label: slot.filled ? slot.label : 'Reports (.skyr)',
+      label: skyrSlot.label,
       sublabel: 'Skyline reports',
-      status: fileStatus(slot, false, true),
+      status: 'active',
       stage: 0,
       formPath: 'skyline.skyr_file',
     });
   }
 
-  // Carafe input spectra — only when carafe enabled. Source decides which
-  // form value drives this.
+  // Carafe input spectra — only when Carafe is enabled. Required.
   if (carafe && !msconvertOnly) {
     const source = state.values['carafe.source'];
     let slot: FileSlot = { filled: false, label: '?' };
@@ -291,16 +282,15 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
     });
   }
 
-  // Narrow-window spectra — optional, only render when user has begun setting it.
+  // Narrow-window spectra — optional. Only shown when set.
   const narrow = state.values['chromatogram_library_spectra_dir'];
   const narrowRelevant =
     !msconvertOnly && (engine === 'encyclopedia' || engine === 'diann');
-  const showNarrow = narrowRelevant && isNonEmptyString(narrow);
-  if (showNarrow) {
+  if (narrowRelevant && isNonEmptyString(narrow)) {
     addNode(g, {
       id: 'input.narrow',
       kind: 'input-file',
-      label: truncate(basenameOf(String(narrow))),
+      label: truncate(basenameOf(narrow)),
       sublabel: 'Narrow-window spectra',
       status: 'active',
       stage: 0,
@@ -347,7 +337,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       });
       addEdge(g, 'output.prepared-spectra', 'process.panorama-upload');
     }
-    return { nodes: g.nodes, edges: g.edges };
+    return { nodes: g.nodes, edges: filterDanglingEdges(g.nodes, g.edges) };
   }
 
   // -----------------------------------------------------------------
@@ -364,7 +354,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       stage: 3,
     });
     addEdge(g, 'input.carafe-spectra', 'process.carafe');
-    if (fastaActive) addEdge(g, 'input.fasta', 'process.carafe');
+    if (fastaRelevant) addEdge(g, 'input.fasta', 'process.carafe');
 
     addNode(g, {
       id: 'output.carafe-library',
@@ -378,20 +368,18 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
   }
 
   // -----------------------------------------------------------------
-  // Stage 3 — Search engine (mutually exclusive)
+  // Stage 3 — Search engine (only the selected one)
   // -----------------------------------------------------------------
 
   const searchStage = 5;
   const searchOutputStage = 6;
 
-  // DIA-NN
-  {
-    const active = engine === 'diann';
+  if (engine === 'diann') {
     addNode(g, {
       id: 'process.diann',
       kind: 'process',
       label: 'DIA-NN search',
-      status: active ? 'active' : 'inactive',
+      status: 'active',
       stage: searchStage,
     });
     addEdge(g, 'output.prepared-spectra', 'process.diann');
@@ -404,20 +392,16 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       kind: 'output-file',
       label: 'Search results',
       sublabel: 'DIA-NN',
-      status: active ? 'active' : 'inactive',
+      status: 'active',
       stage: searchOutputStage,
     });
     addEdge(g, 'process.diann', 'output.diann-results');
-  }
-
-  // EncyclopeDIA
-  {
-    const active = engine === 'encyclopedia';
+  } else if (engine === 'encyclopedia') {
     addNode(g, {
       id: 'process.encyclopedia',
       kind: 'process',
       label: 'EncyclopeDIA search',
-      status: active ? 'active' : 'inactive',
+      status: 'active',
       stage: searchStage,
     });
     addEdge(g, 'output.prepared-spectra', 'process.encyclopedia');
@@ -430,20 +414,16 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       kind: 'output-file',
       label: 'Search results',
       sublabel: 'EncyclopeDIA',
-      status: active ? 'active' : 'inactive',
+      status: 'active',
       stage: searchOutputStage,
     });
     addEdge(g, 'process.encyclopedia', 'output.encyclopedia-results');
-  }
-
-  // Cascadia
-  {
-    const active = engine === 'cascadia';
+  } else if (engine === 'cascadia') {
     addNode(g, {
       id: 'process.cascadia',
       kind: 'process',
       label: 'Cascadia search',
-      status: active ? 'active' : 'inactive',
+      status: 'active',
       stage: searchStage,
     });
     addEdge(g, 'output.prepared-spectra', 'process.cascadia');
@@ -453,7 +433,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       kind: 'output-file',
       label: 'Search results',
       sublabel: 'Cascadia',
-      status: active ? 'active' : 'inactive',
+      status: 'active',
       stage: searchOutputStage,
     });
     addEdge(g, 'process.cascadia', 'output.cascadia-results');
@@ -463,20 +443,18 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       kind: 'output-file',
       label: 'Generated FASTA',
       sublabel: 'Cascadia',
-      status: active ? 'active' : 'inactive',
+      status: 'active',
       stage: searchOutputStage,
     });
     addEdge(g, 'process.cascadia', 'output.cascadia-fasta');
-  }
-
-  // No-search marker
-  if (engine === null) {
+  } else {
+    // engine === null: library is passed straight through to Skyline.
     addNode(g, {
       id: 'process.no-search',
       kind: 'process',
       label: '(no search)',
       sublabel: 'library passthrough',
-      status: 'inactive',
+      status: 'active',
       stage: searchStage,
     });
     if (carafe) addEdge(g, 'output.carafe-library', 'process.no-search');
@@ -498,10 +476,9 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
     addEdge(g, 'output.prepared-spectra', 'process.skyline');
     if (engine === 'cascadia') {
       addEdge(g, 'output.cascadia-fasta', 'process.skyline');
-    } else if (fastaActive) {
+    } else if (fastaRelevant) {
       addEdge(g, 'input.fasta', 'process.skyline');
     }
-    // Final library that fed the search
     if (engine === 'diann') addEdge(g, 'output.diann-results', 'process.skyline');
     else if (engine === 'encyclopedia') addEdge(g, 'output.encyclopedia-results', 'process.skyline');
     else if (engine === 'cascadia') addEdge(g, 'output.cascadia-results', 'process.skyline');
@@ -526,7 +503,6 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
     // Stage 5 — Reporting (parallel siblings)
     // -----------------------------------------------------------------
 
-    const skyrFilled = isNonEmptyString(state.values['skyline.skyr_file']);
     if (skyrFilled) {
       addNode(g, {
         id: 'process.skyline-reports',
@@ -612,10 +588,13 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
     if (!skylineSkip) addEdge(g, 'output.skyline-doc', 'process.panorama-upload');
   }
 
-  // Filter dangling edges (endpoints not in node set) so callers can rely on
-  // edge integrity for layout.
-  const nodeIds = new Set(g.nodes.map((n) => n.id));
-  const edges = g.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
+  return { nodes: g.nodes, edges: filterDanglingEdges(g.nodes, g.edges) };
+}
 
-  return { nodes: g.nodes, edges };
+function filterDanglingEdges(
+  nodes: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+): GraphEdge[] {
+  const ids = new Set(nodes.map((n) => n.id));
+  return edges.filter((e) => ids.has(e.from) && ids.has(e.to));
 }

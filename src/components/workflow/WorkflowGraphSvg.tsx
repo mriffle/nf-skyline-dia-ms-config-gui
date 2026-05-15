@@ -23,25 +23,12 @@ const PROCESS_STYLES: Record<NodeStatus, NodeStyle> = {
     textColor: '#ffffff',
     subTextColor: '#d8def0',  // accent.100
   },
-  inactive: {
-    fill: '#f1f5f9',          // slate.100
-    stroke: '#cbd5e1',        // slate.300
-    textColor: '#64748b',     // slate.500
-    subTextColor: '#94a3b8',  // slate.400
-  },
   'required-missing': {
     fill: '#ffffff',
     stroke: '#ef4444',        // red.500
     strokeDasharray: '4 3',
     textColor: '#dc2626',     // red.600
     subTextColor: '#f87171',  // red.400
-  },
-  'optional-missing': {
-    fill: '#f8fafc',          // slate.50
-    stroke: '#cbd5e1',        // slate.300
-    strokeDasharray: '2 3',
-    textColor: '#94a3b8',
-    subTextColor: '#cbd5e1',
   },
 };
 
@@ -52,25 +39,12 @@ const FILE_STYLES: Record<NodeStatus, NodeStyle> = {
     textColor: '#1f2a4a',
     subTextColor: '#475fa6',
   },
-  inactive: {
-    fill: '#f1f5f9',
-    stroke: '#cbd5e1',
-    textColor: '#64748b',     // slate.500
-    subTextColor: '#94a3b8',  // slate.400
-  },
   'required-missing': {
     fill: '#ffffff',
     stroke: '#ef4444',
     strokeDasharray: '4 3',
     textColor: '#dc2626',
     subTextColor: '#f87171',
-  },
-  'optional-missing': {
-    fill: '#f8fafc',
-    stroke: '#cbd5e1',
-    strokeDasharray: '2 3',
-    textColor: '#94a3b8',
-    subTextColor: '#cbd5e1',
   },
 };
 

@@ -30,11 +30,9 @@ export function WorkflowGraphPane() {
         <WorkflowGraphSvg layout={layout} edges={graph.edges} />
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-        <LegendSwatch kind="process-active" label="active process" />
-        <LegendSwatch kind="file-active" label="file (provided)" />
+        <LegendSwatch kind="process-active" label="process" />
+        <LegendSwatch kind="file-active" label="file" />
         <LegendSwatch kind="required" label="required, missing" />
-        <LegendSwatch kind="optional" label="optional" />
-        <LegendSwatch kind="inactive" label="inactive branch" />
       </div>
     </aside>
   );
@@ -44,15 +42,13 @@ function LegendSwatch({
   kind,
   label,
 }: {
-  readonly kind: 'process-active' | 'file-active' | 'required' | 'optional' | 'inactive';
+  readonly kind: 'process-active' | 'file-active' | 'required';
   readonly label: string;
 }) {
   const cls = {
     'process-active': 'bg-accent-500 border-accent-700',
     'file-active': 'bg-accent-50 border-accent-700',
     required: 'bg-white border-red-500 border-dashed',
-    optional: 'bg-slate-50 border-slate-300 border-dotted',
-    inactive: 'bg-slate-100 border-slate-300',
   }[kind];
   return (
     <span className="inline-flex items-center gap-1.5">

@@ -261,14 +261,20 @@ Architecture mirrors the emitter:
   defaults to `'preview'`). The mobile show/hide toggle wraps the entire
   tabbed area, preserving prior behavior.
 
-**Node statuses** (drive color/border):
+**Active-only graph**: only nodes that will actually run / be consumed are
+emitted. Unselected branches (the other search engines, FASTA in Cascadia
+mode, the user library when Carafe is supplying one, optional inputs the user
+hasn't filled) are omitted entirely — *not* faded. This keeps the graph
+focused on "what's about to run." There are only two node statuses:
+
 - `active` — process will execute / file is provided. Accent fill.
-- `inactive` — node lives in an unselected branch (e.g. EncyclopeDIA when
-  DIA-NN is selected). Slate, faded but readable.
 - `required-missing` — user-supplied input that's needed but not set.
   Red dashed border, big `?` label.
-- `optional-missing` — user-supplied input that's optional and not set.
-  Slate dotted border.
+
+**Skyline template special case**: the workflow uses a built-in default
+template if the user doesn't supply one, so the template node is always
+'active' when Skyline runs — labeled `Default template` when unset, the
+filename when set.
 
 **Conditional gating** is hand-coded in `computeWorkflowGraph.ts` against
 `state.values`. Do **not** try to reuse `requiredWhen` from `paramMetadata.ts`
@@ -468,7 +474,7 @@ When you add an `alwaysEmit` field:
 | Zustand store internals              | LIGHT   | Smoke + mode-switch behavior         |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **259 tests across 17 files**. Run `npm test` before pushing.
+Current count: **263 tests across 17 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff

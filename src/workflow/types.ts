@@ -4,11 +4,7 @@
 
 export type NodeKind = 'input-file' | 'process' | 'output-file';
 
-export type NodeStatus =
-  | 'active'
-  | 'inactive'
-  | 'required-missing'
-  | 'optional-missing';
+export type NodeStatus = 'active' | 'required-missing';
 
 export interface GraphNode {
   readonly id: string;
