@@ -341,8 +341,8 @@ edge from the Carafe-generated library output instead.
 **Rendering rules to keep in mind**:
 - Edges are filtered against the final node set; a "edge integrity" test
   guards this. Don't emit dangling edges.
-- All SVG hand-written. Adding a chart library would blow the bundle budget
-  and violate the no-UI-libs rule.
+- All SVG hand-written. Adding a chart library would violate the no-UI-libs
+  rule and add weight that hand-rolled paths don't need.
 
 ### 8. Widget catalog
 
@@ -382,7 +382,11 @@ so the coverage test sees them as accounted for.
 7. **All emit output is byte-stable** given fixed `version` + `timestamp`
    options. Don't introduce nondeterminism (Sets, Map iteration, etc.) in
    the emit pipeline.
-8. **Bundle budget**: keep gzipped JS under ~150 KB. Currently ~88 KB.
+8. **Be efficient with the bundle.** No fixed size ceiling, but don't add
+   bloat: prefer hand-rolled SVG / small utilities over heavy npm
+   dependencies, especially UI/chart libraries. Run `npm run build` after
+   adding a dependency and check the gzipped JS line — a sudden jump of
+   tens of KB warrants justification.
 9. **Schema lives at the repo root** (`./nextflow_schema.json`), not at
    `../nextflow_schema.json` — this repo is standalone, not a subfolder.
 
