@@ -96,7 +96,8 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
 form-state scenarios and screenshots both tabs. Used for visual smoke-checks
 when touching the workflow graph or layout. Run `npm run dev` first, then
 `node scripts/visual-check.mjs --port 5173`. Output PNGs land in `screenshots/`
-(gitignored).
+(gitignored). `scripts/click-check.mjs` is a smaller companion that exercises
+the click-to-focus behavior on input nodes.
 
 ## Architecture — the load-bearing concepts
 
@@ -269,12 +270,40 @@ focused on "what's about to run." There are only two node statuses:
 
 - `active` — process will execute / file is provided. Accent fill.
 - `required-missing` — user-supplied input that's needed but not set.
-  Red dashed border, big `?` label.
+  Same chrome as a filled file node, but the filename slot renders `?`
+  in red (`MISSING_LABEL_COLOR` in `WorkflowGraphSvg.tsx`). The descriptive
+  sublabel ("Spectra files", "FASTA database", etc.) is shown in its
+  normal position.
 
 **Skyline template special case**: the workflow uses a built-in default
 template if the user doesn't supply one, so the template node is always
 'active' when Skyline runs — labeled `Default template` when unset, the
 filename when set.
+
+**Click-to-focus**: input file nodes that carry a `formPath` are clickable
+(also keyboard-activatable via Enter/Space). A click scrolls the matching
+`#field-<path>` into view, focuses the first input within it, and briefly
+flashes the field's background (`.wf-field-flash` keyframes in
+`index.css`). Process and output nodes have no `formPath` and remain
+non-interactive. The Carafe-input node has a special fallback: when
+`carafe.source` is unset, its `formPath` is `'carafe.source'` itself
+(the source-selector dropdown) so the click always lands somewhere
+useful; once a source is picked, `formPath` switches to that source's
+specific value field.
+
+**Edge routing**: edges that span 2+ rows are routed with a cubic bezier
+that bows past the central column of intermediate nodes. The `apexX` is
+placed `APEX_CLEARANCE` (24px) outside the obstacle envelope; the
+control-point x is back-solved from `apexX` because for a cubic with
+both control points at the same x, the curve's midpoint sits only ~75%
+of the way out toward that x. Side selection picks whichever side
+minimizes total endpoint travel. If both endpoints already sit clearly
+to the same side of the obstacle, the curve falls back to a plain
+straight bezier (cleaner). Adjacent rows always use the simple bezier
+since there are no obstacles in between. **Don't replace this with
+orthogonal/Manhattan routing through side channels** — the user
+explicitly rejected that approach as "not natural" because the lines
+flowed out to the page edges and back in.
 
 **Conditional gating** is hand-coded in `computeWorkflowGraph.ts` against
 `state.values`. Do **not** try to reuse `requiredWhen` from `paramMetadata.ts`
@@ -496,7 +525,7 @@ When you add an `alwaysEmit` field:
 | Zustand store internals              | LIGHT   | Smoke + mode-switch behavior         |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **280 tests across 17 files**. Run `npm test` before pushing.
+Current count: **282 tests across 17 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
