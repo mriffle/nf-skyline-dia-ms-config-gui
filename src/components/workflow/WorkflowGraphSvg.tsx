@@ -11,11 +11,13 @@ interface Props {
 interface NodeStyle {
   readonly fill: string;
   readonly stroke: string;
-  readonly strokeDasharray?: string;
   readonly textColor: string;
   readonly subTextColor: string;
 }
 
+// Required-missing nodes use the same chrome as their filled counterparts; the
+// only visual cue is the "?" placeholder rendered in red where the filename
+// would normally be. Drops the prior dashed-red border + giant "?" treatment.
 const PROCESS_STYLES: Record<NodeStatus, NodeStyle> = {
   active: {
     fill: '#475fa6',          // accent.500
@@ -24,11 +26,10 @@ const PROCESS_STYLES: Record<NodeStatus, NodeStyle> = {
     subTextColor: '#d8def0',  // accent.100
   },
   'required-missing': {
-    fill: '#ffffff',
-    stroke: '#ef4444',        // red.500
-    strokeDasharray: '4 3',
-    textColor: '#dc2626',     // red.600
-    subTextColor: '#f87171',  // red.400
+    fill: '#475fa6',
+    stroke: '#2f3f6e',
+    textColor: '#ffffff',
+    subTextColor: '#d8def0',
   },
 };
 
@@ -40,13 +41,14 @@ const FILE_STYLES: Record<NodeStatus, NodeStyle> = {
     subTextColor: '#475fa6',
   },
   'required-missing': {
-    fill: '#ffffff',
-    stroke: '#ef4444',
-    strokeDasharray: '4 3',
-    textColor: '#dc2626',
-    subTextColor: '#f87171',
+    fill: '#eef1f9',
+    stroke: '#2f3f6e',
+    textColor: '#1f2a4a',
+    subTextColor: '#475fa6',
   },
 };
+
+const MISSING_LABEL_COLOR = '#dc2626'; // red.600 — only the "?" itself is red
 
 function styleFor(node: PositionedNode): NodeStyle {
   const isProcess = node.kind === 'process';
@@ -74,7 +76,8 @@ function fileShapePath(cx: number, cy: number): string {
 function WorkflowNodeShape({ node }: { node: PositionedNode }) {
   const style = styleFor(node);
   const isProcess = node.kind === 'process';
-  const labelIsQuestion = node.label === '?';
+  const isMissing = node.status === 'required-missing';
+  const labelColor = isMissing ? MISSING_LABEL_COLOR : style.textColor;
 
   return (
     <g>
@@ -89,7 +92,6 @@ function WorkflowNodeShape({ node }: { node: PositionedNode }) {
           fill={style.fill}
           stroke={style.stroke}
           strokeWidth={1.5}
-          strokeDasharray={style.strokeDasharray}
         />
       ) : (
         <path
@@ -97,46 +99,30 @@ function WorkflowNodeShape({ node }: { node: PositionedNode }) {
           fill={style.fill}
           stroke={style.stroke}
           strokeWidth={1.5}
-          strokeDasharray={style.strokeDasharray}
           strokeLinejoin="round"
         />
       )}
-      {labelIsQuestion ? (
+      <text
+        x={node.x}
+        y={node.sublabel ? node.y - 2 : node.y + 4}
+        textAnchor="middle"
+        fontSize={12}
+        fontWeight={600}
+        fill={labelColor}
+      >
+        {node.label}
+      </text>
+      {node.sublabel ? (
         <text
           x={node.x}
-          y={node.y + 8}
+          y={node.y + 14}
           textAnchor="middle"
-          fontSize={28}
-          fontWeight={700}
-          fill={style.textColor}
+          fontSize={10}
+          fill={style.subTextColor}
         >
-          ?
+          {node.sublabel}
         </text>
-      ) : (
-        <>
-          <text
-            x={node.x}
-            y={node.sublabel ? node.y - 2 : node.y + 4}
-            textAnchor="middle"
-            fontSize={12}
-            fontWeight={600}
-            fill={style.textColor}
-          >
-            {node.label}
-          </text>
-          {node.sublabel ? (
-            <text
-              x={node.x}
-              y={node.y + 14}
-              textAnchor="middle"
-              fontSize={10}
-              fill={style.subTextColor}
-            >
-              {node.sublabel}
-            </text>
-          ) : null}
-        </>
-      )}
+      ) : null}
     </g>
   );
 }
@@ -147,10 +133,6 @@ interface EdgeProps {
 }
 
 function WorkflowEdgePath({ from, to }: EdgeProps) {
-  const inactive = from.status !== 'active' || to.status !== 'active';
-  const stroke = inactive ? '#cbd5e1' : '#94a3b8'; // slate.300 vs slate.400
-  const marker = inactive ? 'url(#wf-arrow-inactive)' : 'url(#wf-arrow-active)';
-
   const x1 = from.x;
   const y1 = from.y + NODE_HEIGHT / 2;
   const x2 = to.x;
@@ -165,9 +147,9 @@ function WorkflowEdgePath({ from, to }: EdgeProps) {
     <path
       d={d}
       fill="none"
-      stroke={stroke}
+      stroke="#94a3b8"          // slate.400
       strokeWidth={1.25}
-      markerEnd={marker}
+      markerEnd="url(#wf-arrow)"
     />
   );
 }
@@ -186,7 +168,7 @@ function WorkflowGraphSvgImpl({ layout, edges }: Props) {
     >
       <defs>
         <marker
-          id="wf-arrow-active"
+          id="wf-arrow"
           viewBox="0 0 8 8"
           refX={7}
           refY={4}
@@ -195,17 +177,6 @@ function WorkflowGraphSvgImpl({ layout, edges }: Props) {
           orient="auto-start-reverse"
         >
           <path d="M 0 0 L 8 4 L 0 8 z" fill="#94a3b8" />
-        </marker>
-        <marker
-          id="wf-arrow-inactive"
-          viewBox="0 0 8 8"
-          refX={7}
-          refY={4}
-          markerWidth={6}
-          markerHeight={6}
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 8 4 L 0 8 z" fill="#cbd5e1" />
         </marker>
       </defs>
       <g>
