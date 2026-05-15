@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import type { KeyboardEvent } from 'react';
 import type { LayoutResult, PositionedNode } from '../../workflow/layout';
 import { NODE_HEIGHT, NODE_WIDTH } from '../../workflow/layout';
 import type { GraphEdge, NodeStatus } from '../../workflow/types';
@@ -6,6 +7,7 @@ import type { GraphEdge, NodeStatus } from '../../workflow/types';
 interface Props {
   readonly layout: LayoutResult;
   readonly edges: readonly GraphEdge[];
+  readonly onNodeClick?: (formPath: string) => void;
 }
 
 interface NodeStyle {
@@ -73,14 +75,44 @@ function fileShapePath(cx: number, cy: number): string {
   ].join(' ');
 }
 
-function WorkflowNodeShape({ node }: { node: PositionedNode }) {
+function WorkflowNodeShape({
+  node,
+  onClick,
+}: {
+  node: PositionedNode;
+  onClick?: (formPath: string) => void;
+}) {
   const style = styleFor(node);
   const isProcess = node.kind === 'process';
   const isMissing = node.status === 'required-missing';
   const labelColor = isMissing ? MISSING_LABEL_COLOR : style.textColor;
+  const clickable = !!(onClick && node.formPath);
+  const handleClick = clickable
+    ? () => onClick!(node.formPath!)
+    : undefined;
+  const handleKey = clickable
+    ? (e: KeyboardEvent<SVGGElement>) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick!(node.formPath!);
+        }
+      }
+    : undefined;
 
   return (
-    <g>
+    <g
+      onClick={handleClick}
+      onKeyDown={handleKey}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={
+        clickable
+          ? `${node.sublabel ?? node.label}: jump to form field`
+          : undefined
+      }
+      style={clickable ? { cursor: 'pointer' } : undefined}
+      className={clickable ? 'wf-clickable' : undefined}
+    >
       {isProcess ? (
         <rect
           x={node.x - NODE_WIDTH / 2}
@@ -154,7 +186,7 @@ function WorkflowEdgePath({ from, to }: EdgeProps) {
   );
 }
 
-function WorkflowGraphSvgImpl({ layout, edges }: Props) {
+function WorkflowGraphSvgImpl({ layout, edges, onNodeClick }: Props) {
   const nodeById = new Map(layout.nodes.map((n) => [n.id, n]));
 
   return (
@@ -189,7 +221,7 @@ function WorkflowGraphSvgImpl({ layout, edges }: Props) {
       </g>
       <g>
         {layout.nodes.map((n) => (
-          <WorkflowNodeShape key={n.id} node={n} />
+          <WorkflowNodeShape key={n.id} node={n} onClick={onNodeClick} />
         ))}
       </g>
     </svg>

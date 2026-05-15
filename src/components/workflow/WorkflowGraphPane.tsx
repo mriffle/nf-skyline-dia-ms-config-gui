@@ -1,9 +1,22 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useStore } from '../../state/store';
 import { computeWorkflowGraph } from '../../workflow/computeWorkflowGraph';
 import { layoutGraph } from '../../workflow/layout';
 import type { FormState } from '../../params/paramMetadata';
 import { WorkflowGraphSvg } from './WorkflowGraphSvg';
+
+function focusFormField(formPath: string): void {
+  const el = document.getElementById(`field-${formPath}`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Briefly highlight, then focus the first focusable input within.
+  el.classList.add('wf-field-flash');
+  window.setTimeout(() => el.classList.remove('wf-field-flash'), 1200);
+  const focusable = el.querySelector<HTMLElement>(
+    'input:not([type="hidden"]), select, textarea, button',
+  );
+  if (focusable) focusable.focus({ preventScroll: true });
+}
 
 export function WorkflowGraphPane() {
   const mode = useStore((s) => s.mode);
@@ -12,6 +25,9 @@ export function WorkflowGraphPane() {
   const state: FormState = useMemo(() => ({ mode, values, touched }), [mode, values, touched]);
   const graph = useMemo(() => computeWorkflowGraph(state), [state]);
   const layout = useMemo(() => layoutGraph(graph), [graph]);
+  const handleNodeClick = useCallback((formPath: string) => {
+    focusFormField(formPath);
+  }, []);
 
   return (
     <aside
@@ -27,7 +43,7 @@ export function WorkflowGraphPane() {
         </div>
       </div>
       <div className="px-3 py-3">
-        <WorkflowGraphSvg layout={layout} edges={graph.edges} />
+        <WorkflowGraphSvg layout={layout} edges={graph.edges} onNodeClick={handleNodeClick} />
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
         <LegendSwatch kind="process" label="process" />
