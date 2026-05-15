@@ -3,7 +3,7 @@
 // to the appropriate widget component.
 
 import { useId } from 'react';
-import { paramMetadataByPath, getEffectiveDefault } from '../../params/paramMetadata';
+import { paramMetadataByPath, getEffectiveDefault, isAlwaysEmit } from '../../params/paramMetadata';
 import { useStore } from '../../state/store';
 import { useFieldValue } from '../../hooks/useFieldValue';
 import { useValidation } from '../../hooks/useValidation';
@@ -42,20 +42,20 @@ export function Field({ path }: FieldProps) {
   // Tier check.
   if (meta.tier === 'advanced' && !showAdvanced) return null;
 
-  const disabled = meta.enabledWhen ? !meta.enabledWhen(state) : false;
   const required = meta.requiredWhen ? meta.requiredWhen(state) : false;
   const error = validation.fieldErrors[path];
   const inputId = `input-${generatedId}`;
   // alwaysEmit fields always carry a value in the dropdown / input itself,
   // so a separate "Default: X" hint would just duplicate what's already on
   // screen.
-  const defaultHint = meta.alwaysEmit ? null : formatDefault(getEffectiveDefault(meta));
+  const defaultHint = isAlwaysEmit(meta, state)
+    ? null
+    : formatDefault(getEffectiveDefault(meta));
 
   const widgetProps: WidgetProps = {
     meta,
     value,
     onChange: (v) => setValue(path, v),
-    disabled,
     required,
     error,
     inputId,
@@ -68,7 +68,6 @@ export function Field({ path }: FieldProps) {
       label={meta.label}
       help={meta.help}
       error={error}
-      disabled={disabled}
       required={required}
       defaultHint={defaultHint ?? undefined}
     >

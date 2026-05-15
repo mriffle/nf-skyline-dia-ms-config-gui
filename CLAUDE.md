@@ -10,12 +10,14 @@ guidance without having to re-derive it from the code.
 
 ## What this is
 
-A static React + TypeScript single-page web app that helps users generate
-`nextflow.config` override files for the
+A static React + TypeScript single-page web app that helps users generate a
+`pipeline.config` Nextflow override file for the
 [nf-skyline-dia-ms](https://github.com/mriffle/nf-skyline-dia-ms) DIA proteomics
 workflow. The workflow has ~99 user-facing parameters and editing the config by
 hand is intimidating; this app exposes them via a sectioned, validated form
-with a live preview, then emits a clean minimal override.
+with a live preview, then emits a clean minimal override. (The downloaded file
+is named `pipeline.config` rather than `nextflow.config` so users explicitly
+pass it via `-c pipeline.config` instead of it being auto-picked-up.)
 
 The app is **separate** from the workflow repo. It is deployed to GitHub Pages
 at https://mriffle.github.io/nf-skyline-dia-ms-config-gui/ and does **not**
@@ -127,15 +129,29 @@ the click-to-focus behavior on input nodes.
   `defaultOverride: <real default>` on the metadata entry. Used for UI
   display only (placeholder + `Default: X` hint). Does NOT affect emit
   or validation by itself. Resolved by `getEffectiveDefault(meta)`.
-- **`alwaysEmit: true` on `ParamMeta`**: marks a parameter as
-  "load-bearing — always write it to the generated config, even when the
-  user hasn't touched it". The emit pipeline picks the user's value if
-  present, otherwise falls back to `getEffectiveDefault(meta)`. The
-  field UI suppresses the `Default: X` hint because the value is
-  already visible in the input. Currently used by `search_engine` only;
-  pair it with `defaultOverride` when the UI default differs from the
-  schema default, and pre-seed the value in `createDefaultState` so the
-  validator sees the value from first render.
+- **`alwaysEmit` on `ParamMeta`**: marks a parameter as "load-bearing —
+  always write it to the generated config, even when the user hasn't
+  touched it". May be `true` (unconditional) or a `(state) => boolean`
+  predicate that gates the behavior on form state. The emit pipeline
+  picks the user's value if present, otherwise falls back to
+  `getEffectiveDefault(meta)`. When the predicate returns false the
+  param falls back to the normal emit-only-touched rule. The field UI
+  suppresses the `Default: X` hint while always-emit is active because
+  the value is already visible in the input. Evaluate via the exported
+  `isAlwaysEmit(meta, state)` helper — don't compare the field directly.
+  Pair with `defaultOverride` when the UI default differs from the
+  schema default, and pre-seed the value in `createDefaultState` if a
+  cross-field validator must see the value from first render. Currently
+  used by: `search_engine` (true), `qc_report.skip` (true),
+  `diann.search_params` / `diann.fasta_digest_params` (predicate on
+  `searchEngineIs('diann','DiaNN')`), `encyclopedia.quant.params` /
+  `encyclopedia.chromatogram.params` (predicate on
+  `searchEngineIs('encyclopedia','EncyclopeDIA')`),
+  `cascadia.use_gpu` / `cascadia.score_threshold` (predicate on
+  `searchEngineIs('cascadia','CascaDIA','Cascadia')`),
+  `carafe.cli_options` (predicate on `carafeEnabled`), and
+  `skyline.group_proteins` / `skyline.group_by_gene` /
+  `skyline.protein_parsimony` (predicate on `skylineNotSkipped`).
 
 ### 2. Mode toggle (General / PDC)
 
@@ -183,6 +199,19 @@ paths that would become invisible.
   pre-seeded so the validator's `searchEngineIs('diann', 'encyclopedia')`
   predicate fires on first render (so e.g. `requiredWhen` on FASTA is
   active immediately).
+- `qc_report.skip: false` — paired with `defaultOverride: false` and
+  `alwaysEmit: true` on the meta. The upstream schema defaults `skip` to
+  `true` (don't run QC); the builder flips this and writes `skip = false`
+  explicitly so every generated config runs QC unless the user opts out.
+- `batch_report.skip: true` — matches the upstream schema default. Not
+  `alwaysEmit`; the seed only exists so the toggle and the dependent
+  `visibleWhen` predicates (which hide child fields when skip is on)
+  display the correct effective default from first render.
+- `skyline.group_proteins: true` — paired with `defaultOverride: true` on
+  the meta. The upstream schema defaults this to `false`; the builder
+  flips it. `alwaysEmit` is gated on `skylineNotSkipped`, so the
+  generated config writes `group_proteins = true` whenever Skyline is
+  running.
 
 If you change what's pre-seeded, bump `CURRENT_STORE_VERSION` so the
 `persist.migrate` step resets stale browser drafts to the new default.
@@ -190,9 +219,11 @@ If you change what's pre-seeded, bump `CURRENT_STORE_VERSION` so the
 ### 4. Emit-only-touched invariant (DO NOT BREAK)
 
 `emitConfig(state)` outputs **only paths where `touched[path] === true`**,
-PLUS any params marked `alwaysEmit: true` (currently `search_engine`).
-A param the user never edited and that lacks `alwaysEmit` is *not*
-emitted, even if its current value equals the schema default. The
+PLUS any params for which `isAlwaysEmit(meta, state)` returns true (either
+the `alwaysEmit: true` flag or an `alwaysEmit` predicate that fires for the
+current state — see the list in section 1).
+A param the user never edited and that isn't active under `alwaysEmit` is
+*not* emitted, even if its current value equals the schema default. The
 workflow's own `nextflow.config` supplies defaults; this app generates
 an **override** file. Schema defaults are shown in the UI as placeholder
 + `Default: X` hint, but never written to state until the user types.
@@ -348,9 +379,13 @@ actually fire, not just top-level branches:
   user library and without Carafe.
 - `Convert .blib → .dlib` and `Convert .dlib → TSV` appear when the user's
   library file extension forces them.
-- Narrow-window pre-search (`Build chrom. library` for EncyclopeDIA, or
-  `DIA-NN narrow search`) appears when `chromatogram_library_spectra_dir` is
-  set and the engine supports it (Cascadia ignores it).
+- Empirical-library build (`Build empirical library`, with sublabel
+  `EncyclopeDIA` or `DIA-NN (subset search)`) appears when
+  `chromatogram_library_spectra_dir` is set and the engine supports it
+  (Cascadia ignores it). The user-facing concept is "empirical library";
+  the underlying schema path still uses the legacy `chromatogram_library_*`
+  names, and EncyclopeDIA's tooling still calls its build step
+  "chromatogram." Don't rename the schema keys.
 - `Annotate doc` appears when replicate metadata is set or in PDC mode.
 - `Minimize doc` appears only when `skyline.minimize == true`.
 
@@ -453,7 +488,9 @@ clean name. Don't try to "fix" this locally — the trim handles it.
 2. Coverage test fails listing missing paths.
 3. Add a `ParamMeta` entry in the appropriate section of `paramMetadata.ts`
    with `section`, `tier`, `label`, `help`, `widget`, plus `visibleWhen` /
-   `enabledWhen` / `requiredWhen` if conditional.
+   `requiredWhen` if conditional. Conditional visibility is the only
+   "disabled" mechanism — there is no `enabledWhen`; if a field shouldn't
+   be edited given other state, hide it via `visibleWhen`.
 4. If the new param shouldn't be surfaced: add it to `IGNORED_PARAM_PATHS`
    with a comment explaining why.
 
@@ -480,16 +517,20 @@ asserts `values: { ... }` and the `parsed.version` check in the
 persistence test.
 
 ### Making a parameter always appear in the generated config
-Set `alwaysEmit: true` on its `ParamMeta` entry. The emitter then
-includes it regardless of `touched`. Combine with `defaultOverride` if
-the UI default differs from the schema default, and pre-seed the value
-in `createDefaultState` so cross-field validators that read it work
-from first render.
+Set `alwaysEmit` on its `ParamMeta` entry — either `true` for unconditional
+always-emit, or a `(state) => boolean` predicate when it should only emit
+under certain form state (e.g. engine- or feature-gated params). The
+emitter includes the param whenever `isAlwaysEmit(meta, state)` is true,
+regardless of `touched`. Combine with `defaultOverride` if the UI default
+differs from the schema default, and pre-seed the value in
+`createDefaultState` so cross-field validators that read it work from
+first render.
 
 When you add an `alwaysEmit` field:
-- Re-evaluate every golden file in `src/emit/__tests__/golden/` — the
-  field will now appear in every emit unless explicitly suppressed,
-  which changes most or all of them.
+- Re-evaluate every golden file in `src/emit/__tests__/golden/` — for
+  unconditional `alwaysEmit: true` the field appears in every emit, and
+  even a predicate-gated entry will affect many scenarios. Either way,
+  most goldens will change.
 - The `Default: X` hint is auto-suppressed by `Field.tsx` for
   `alwaysEmit` fields.
 

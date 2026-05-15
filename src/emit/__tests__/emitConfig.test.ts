@@ -44,7 +44,7 @@ describe('emitConfig — header + structure', () => {
     expect(out).toContain('// nf-skyline-dia-ms configuration');
     expect(out).toContain(`v${FIXED_VERSION}`);
     expect(out).toContain('2026-01-15T12:00:00.000Z');
-    expect(out).toContain('https://mriffle.github.io/nf-skyline-dia-ms/');
+    expect(out).toContain('https://mriffle.github.io/nf-skyline-dia-ms-config-gui/');
   });
 
   it('ends with a trailing newline', () => {
@@ -142,6 +142,8 @@ describe('emitConfig — golden files', () => {
       mode: 'pdc',
       values: {
         'pdc.study_id': 'PDC000504',
+        use_carafe: true,
+        'carafe.source': 'pdc-sample',
         'carafe.pdc_n_files': 5,
         'carafe.include_phosphorylation': true,
       },

@@ -456,7 +456,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       id: 'input.narrow',
       kind: 'input-file',
       label: slot.filled ? slot.label : truncate(String(narrow)),
-      sublabel: 'Narrow-window spectra',
+      sublabel: 'Empirical-library spectra',
       status: 'active',
       stage: 0,
       formPath: 'chromatogram_library_spectra_dir',
@@ -535,7 +535,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
     addNode(g, {
       id: 'output.narrow-prepared',
       kind: 'output-file',
-      label: 'Prepared narrow',
+      label: 'Prepared empirical',
       sublabel: '.mzML',
       status: 'active',
       stage: 2,
@@ -715,18 +715,20 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
   }
 
   // -----------------------------------------------------------------
-  // Stage 5 — Narrow-window pre-search (optional)
+  // Stage 5 — Empirical-library build (optional)
   // -----------------------------------------------------------------
 
-  // When narrow-window spectra are configured and the engine supports them,
-  // a pre-search runs that produces an enriched library for the wide search.
+  // When empirical-library spectra (narrow-window GPF, pooled samples, or a
+  // subset of the quant files) are configured and the engine supports them,
+  // a pre-search runs that produces an empirical library used for the wide
+  // search.
   let wideSearchLibrary = libraryForSearch;
   if (narrowSet && narrowSpectraSource) {
     if (engine === 'encyclopedia') {
       addNode(g, {
         id: 'process.narrow-elib',
         kind: 'process',
-        label: 'Build chrom. library',
+        label: 'Build empirical library',
         sublabel: 'EncyclopeDIA',
         status: 'active',
         stage: 5,
@@ -738,7 +740,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       addNode(g, {
         id: 'output.chrom-library',
         kind: 'output-file',
-        label: 'Chromatogram library',
+        label: 'Empirical library',
         sublabel: '.elib',
         status: 'active',
         stage: 6,
@@ -749,8 +751,8 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       addNode(g, {
         id: 'process.diann-narrow',
         kind: 'process',
-        label: 'DIA-NN narrow search',
-        sublabel: 'subset',
+        label: 'Build empirical library',
+        sublabel: 'DIA-NN (subset search)',
         status: 'active',
         stage: 5,
       });
@@ -761,7 +763,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       addNode(g, {
         id: 'output.narrow-library',
         kind: 'output-file',
-        label: 'Refined library',
+        label: 'Empirical library',
         sublabel: '.tsv',
         status: 'active',
         stage: 6,

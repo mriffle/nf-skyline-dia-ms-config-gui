@@ -166,7 +166,7 @@ const ruleGlobXorRegexChrom: CrossFieldRule = {
       'chromatogram_library_spectra_glob',
       'chromatogram_library_spectra_regex',
       'chromatogram_library_files',
-      'Chromatogram-library file matching',
+      'Empirical-library file matching',
     );
   },
 };
@@ -377,7 +377,7 @@ const ruleCascadiaNoChrom: CrossFieldRule = {
       isNonEmptyArray(s.values['chromatogram_library_spectra_dir']);
     if (!chromSet) return null;
     return {
-      message: 'Cascadia does not use narrow-window / chromatogram-library spectra.',
+      message: 'Cascadia does not use empirical-library spectra.',
       fields: ['search_engine', 'chromatogram_library_spectra_dir'],
     };
   },

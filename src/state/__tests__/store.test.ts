@@ -9,10 +9,16 @@ beforeEach(() => {
 });
 
 describe('store basics', () => {
-  it('starts in general mode with Carafe enabled and search_engine pre-seeded', () => {
+  it('starts in general mode with Carafe enabled, search_engine pre-seeded, qc/batch skip seeded', () => {
     const s = useStore.getState();
     expect(s.mode).toBe('general');
-    expect(s.values).toEqual({ use_carafe: true, search_engine: 'diann' });
+    expect(s.values).toEqual({
+      use_carafe: true,
+      search_engine: 'diann',
+      'qc_report.skip': false,
+      'batch_report.skip': true,
+      'skyline.group_proteins': true,
+    });
     expect(s.touched).toEqual({});
     expect(s.showAdvanced).toBe(false);
   });
@@ -46,7 +52,13 @@ describe('store basics', () => {
     toggleAdvanced();
     reset();
     const s = useStore.getState();
-    expect(s.values).toEqual({ use_carafe: true, search_engine: 'diann' });
+    expect(s.values).toEqual({
+      use_carafe: true,
+      search_engine: 'diann',
+      'qc_report.skip': false,
+      'batch_report.skip': true,
+      'skyline.group_proteins': true,
+    });
     expect(s.touched).toEqual({});
     expect(s.showAdvanced).toBe(false);
     expect(s.mode).toBe('general');
@@ -141,6 +153,6 @@ describe('localStorage persistence', () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!);
     expect(parsed.state.values.fasta).toBe('/persisted.fasta');
-    expect(parsed.version).toBe(3);
+    expect(parsed.version).toBe(5);
   });
 });

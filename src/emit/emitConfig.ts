@@ -17,7 +17,12 @@
 // paramMetadata order.
 
 import type { FormState, ParamMeta, SectionId } from '../params/paramMetadata';
-import { paramMetadata, paramMetadataByPath, getEffectiveDefault } from '../params/paramMetadata';
+import {
+  paramMetadata,
+  paramMetadataByPath,
+  getEffectiveDefault,
+  isAlwaysEmit,
+} from '../params/paramMetadata';
 import { sections, type Section } from '../params/sections';
 import { toGroovyLiteral } from './groovyLiteral';
 import {
@@ -132,8 +137,9 @@ function collectEntries(state: FormState): OrderedEntry[] {
 
   // 2. AlwaysEmit paths. Value from state.values if present (even untouched —
   // e.g. seeded by createDefaultState); otherwise the effective default.
+  // alwaysEmit may be a predicate, in which case it gates on form state.
   for (const meta of paramMetadata) {
-    if (meta.alwaysEmit !== true) continue;
+    if (!isAlwaysEmit(meta, state)) continue;
     if (seenPaths.has(meta.path)) continue;
     const rawValue =
       meta.path in state.values ? state.values[meta.path] : getEffectiveDefault(meta);

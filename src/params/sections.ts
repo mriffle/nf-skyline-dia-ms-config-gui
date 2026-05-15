@@ -21,7 +21,7 @@ export const sections: readonly Section[] = [
     id: 'input-general',
     title: 'Input data (general)',
     blurb:
-      'Quantitative spectra, optional chromatogram-library spectra, vendor RAW handling, and random sampling for the standard (non-PDC) input path.',
+      'Quantitative spectra, optional empirical-library spectra (narrow-window GPF, pooled samples, or a subset of the search files), vendor RAW handling, and random sampling for the standard (non-PDC) input path.',
   },
   {
     id: 'input-pdc',

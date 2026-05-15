@@ -13,7 +13,7 @@ export function PreviewActions({ content, isDownloadable, blockedReason }: Previ
 
   const onDownload = (): void => {
     if (!isDownloadable) return;
-    downloadTextFile(content, 'nextflow.config');
+    downloadTextFile(content, 'pipeline.config');
   };
 
   const onCopy = async (): Promise<void> => {
@@ -28,7 +28,7 @@ export function PreviewActions({ content, isDownloadable, blockedReason }: Previ
   return (
     <div className="flex items-center justify-between gap-2 border-b border-slate-700/60 bg-slate-900 px-3 py-2">
       <div className="text-[11px] uppercase tracking-wide text-slate-400">
-        nextflow.config preview
+        pipeline.config preview
       </div>
       <div className="flex items-center gap-2">
         <span

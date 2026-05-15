@@ -48,7 +48,6 @@ export interface ParamMeta {
   readonly tier: 'common' | 'advanced';
   readonly widget: Widget;
   readonly visibleWhen?: (s: FormState) => boolean;
-  readonly enabledWhen?: (s: FormState) => boolean;
   // True when this field is conditionally required for the form to validate
   // in the given state. Used to render a required-marker on the field label
   // and set aria-required on the input. Returning false here does not weaken
@@ -70,7 +69,12 @@ export interface ParamMeta {
   // search_engine). The emitted value is the user's value if present, else
   // the effective default. Field UI suppresses the "Default: X" hint for
   // alwaysEmit fields since the value is always present.
-  readonly alwaysEmit?: boolean;
+  //
+  // May also be a predicate to gate the always-emit behavior on form state
+  // (e.g. DIA-NN-specific params only emit when search_engine === 'diann').
+  // When the predicate returns false, the param falls back to the normal
+  // emit-only-touched rule.
+  readonly alwaysEmit?: boolean | ((s: FormState) => boolean);
 }
 
 // Infra knobs power users override in their own profile config, plus the
@@ -112,6 +116,8 @@ const carafeEnabled = (s: FormState) => s.values['use_carafe'] === true;
 function carafeSourceIs(value: string) {
   return (s: FormState) => carafeEnabled(s) && s.values['carafe.source'] === value;
 }
+
+const skylineNotSkipped = (s: FormState) => s.values['skyline.skip'] !== true;
 
 // --- Metadata ------------------------------------------------------------
 //
@@ -161,18 +167,18 @@ export const paramMetadata: readonly ParamMeta[] = [
   {
     path: 'chromatogram_library_spectra_dir',
     section: 'input-general',
-    label: 'Chromatogram-library spectra',
-    help: 'Optional narrow-window / GPF spectra used to build a chromatogram library. Single path or list. Only consumed by engines that support this stage (EncyclopeDIA).',
+    label: 'Empirical-library spectra',
+    help: 'Optional spectra used to build an empirical library before the main quantitative search. Typically narrow-window GPF acquisitions, pooled samples, or a subset of the files to be quantified. Single path or list. Supported by EncyclopeDIA (builds a chromatogram library / .elib) and DIA-NN (runs a subset search to refine the library).',
     tier: 'common',
     widget: 'file-or-url',
-    placeholder: '/path/to/narrow-window or https://panorama.../WebDAV/...',
+    placeholder: '/path/to/empirical-library-spectra or https://panorama.../WebDAV/...',
     visibleWhen: inGeneral,
   },
   {
     path: 'chromatogram_library_files',
     section: 'input-general',
-    label: 'Chrom-library file matching',
-    help: 'Glob or regex applied inside the chromatogram-library spectra path.',
+    label: 'Empirical-library file matching',
+    help: 'Glob or regex applied inside the empirical-library spectra path.',
     tier: 'common',
     widget: 'glob-regex-pair',
     virtual: true,
@@ -184,7 +190,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     section: 'input-general',
     label: 'Use vendor RAW directly',
     help: 'Skip msconvert and feed vendor RAW files straight to the search engine. Only supported by DIA-NN.',
-    tier: 'advanced',
+    tier: 'common',
     widget: 'boolean',
     visibleWhen: inGeneral,
   },
@@ -195,14 +201,13 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'When using vendor RAW, copy rather than hard-link them into the work directory. Required on filesystems that do not support hard links.',
     tier: 'advanced',
     widget: 'boolean',
-    visibleWhen: inGeneral,
-    enabledWhen: (s) => s.values['use_vendor_raw'] === true,
+    visibleWhen: (s) => inGeneral(s) && s.values['use_vendor_raw'] === true,
   },
   {
     path: 'files_per_quant_batch',
     section: 'input-general',
     label: 'Files per quant batch (random sample)',
-    help: 'If set, randomly sample this many quant spectra files per batch instead of using all of them. Seed comes from the random-file seed.',
+    help: 'If set, randomly sample this many quant spectra files per batch instead of using all of them. Intended for testing the workflow without having to download every file at the given location. Seed comes from the random-file seed.',
     tier: 'advanced',
     widget: 'number',
     visibleWhen: inGeneral,
@@ -210,8 +215,8 @@ export const paramMetadata: readonly ParamMeta[] = [
   {
     path: 'files_per_chrom_lib',
     section: 'input-general',
-    label: 'Files per chromatogram library (random sample)',
-    help: 'If set, randomly sample this many narrow-window files instead of using all of them. Seed comes from the random-file seed.',
+    label: 'Files per empirical library (random sample)',
+    help: 'If set, randomly sample this many empirical-library spectra files instead of using all of them. Intended for testing the workflow without having to download every file at the given location. Seed comes from the random-file seed.',
     tier: 'advanced',
     widget: 'number',
     visibleWhen: inGeneral,
@@ -319,6 +324,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     tier: 'advanced',
     widget: 'text',
     visibleWhen: searchEngineIs('diann', 'DiaNN'),
+    // Surfaced in every DIA-NN config so users see exactly which flags ran.
+    alwaysEmit: searchEngineIs('diann', 'DiaNN'),
     group: 'DIA-NN',
   },
   {
@@ -329,6 +336,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     tier: 'advanced',
     widget: 'text',
     visibleWhen: searchEngineIs('diann', 'DiaNN'),
+    alwaysEmit: searchEngineIs('diann', 'DiaNN'),
     group: 'DIA-NN',
   },
   {
@@ -339,23 +347,25 @@ export const paramMetadata: readonly ParamMeta[] = [
     tier: 'advanced',
     widget: 'text',
     visibleWhen: searchEngineIs('encyclopedia', 'EncyclopeDIA'),
+    alwaysEmit: searchEngineIs('encyclopedia', 'EncyclopeDIA'),
     group: 'EncyclopeDIA',
   },
   {
     path: 'encyclopedia.chromatogram.params',
     section: 'search',
-    label: 'EncyclopeDIA chromatogram parameters',
-    help: 'Flags for the narrow-window chromatogram-library step.',
+    label: 'EncyclopeDIA empirical-library parameters',
+    help: 'Flags for the EncyclopeDIA empirical-library build (the "chromatogram" step that emits the .elib).',
     tier: 'advanced',
     widget: 'text',
     visibleWhen: searchEngineIs('encyclopedia', 'EncyclopeDIA'),
+    alwaysEmit: searchEngineIs('encyclopedia', 'EncyclopeDIA'),
     group: 'EncyclopeDIA',
   },
   {
     path: 'encyclopedia.save_output',
     section: 'search',
     label: 'Save per-file EncyclopeDIA outputs',
-    help: 'Persist .dia / .features.txt outputs per input file. Disable to save disk space; the chromatogram library is always retained.',
+    help: 'Persist .dia / .features.txt outputs per input file. Disable to save disk space; the empirical library is always retained.',
     tier: 'advanced',
     widget: 'boolean',
     visibleWhen: searchEngineIs('encyclopedia', 'EncyclopeDIA'),
@@ -369,6 +379,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     tier: 'advanced',
     widget: 'boolean',
     visibleWhen: searchEngineIs('cascadia', 'CascaDIA', 'Cascadia'),
+    alwaysEmit: searchEngineIs('cascadia', 'CascaDIA', 'Cascadia'),
     group: 'Cascadia',
   },
   {
@@ -379,6 +390,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     tier: 'advanced',
     widget: 'number',
     visibleWhen: searchEngineIs('cascadia', 'CascaDIA', 'Cascadia'),
+    alwaysEmit: searchEngineIs('cascadia', 'CascaDIA', 'Cascadia'),
     group: 'Cascadia',
   },
 
@@ -440,8 +452,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'A single .mzML, .raw, or Bruker .d.zip file. Local path or authenticated Panorama URL.',
     tier: 'common',
     widget: 'file-or-url',
-    visibleWhen: carafeEnabled,
-    enabledWhen: carafeSourceIs('file'),
+    visibleWhen: (s) => carafeEnabled(s) && carafeSourceIs('file')(s),
     requiredWhen: carafeSourceIs('file'),
     group: 'Carafe input',
   },
@@ -452,8 +463,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Directory of spectra. Local, authenticated Panorama, or Panorama Public. Filtered with the glob/regex below.',
     tier: 'common',
     widget: 'file-or-url',
-    visibleWhen: carafeEnabled,
-    enabledWhen: carafeSourceIs('dir'),
+    visibleWhen: (s) => carafeEnabled(s) && carafeSourceIs('dir')(s),
     requiredWhen: carafeSourceIs('dir'),
     group: 'Carafe input',
   },
@@ -466,8 +476,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     widget: 'glob-regex-pair',
     virtual: true,
     affects: ['carafe.spectra_glob', 'carafe.spectra_regex'],
-    visibleWhen: carafeEnabled,
-    enabledWhen: carafeSourceIs('dir'),
+    visibleWhen: (s) => carafeEnabled(s) && carafeSourceIs('dir')(s),
     group: 'Carafe input',
   },
   {
@@ -477,8 +486,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'List of PDC file names to feed Carafe. Requires PDC mode. Files outside the main quant subset are downloaded additionally for Carafe only.',
     tier: 'advanced',
     widget: 'string-list',
-    visibleWhen: (s) => carafeEnabled(s) && inPdc(s),
-    enabledWhen: carafeSourceIs('pdc-files'),
+    visibleWhen: (s) => carafeEnabled(s) && inPdc(s) && carafeSourceIs('pdc-files')(s),
     requiredWhen: carafeSourceIs('pdc-files'),
     group: 'Carafe input',
   },
@@ -489,8 +497,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Randomly sample this many files from the main PDC quant set as Carafe input. Subset of the main quant set, so no extra downloads occur. Requires PDC mode.',
     tier: 'advanced',
     widget: 'number',
-    visibleWhen: (s) => carafeEnabled(s) && inPdc(s),
-    enabledWhen: carafeSourceIs('pdc-sample'),
+    visibleWhen: (s) => carafeEnabled(s) && inPdc(s) && carafeSourceIs('pdc-sample')(s),
     requiredWhen: carafeSourceIs('pdc-sample'),
     group: 'Carafe input',
   },
@@ -537,6 +544,9 @@ export const paramMetadata: readonly ParamMeta[] = [
     // and placeholder only.
     defaultOverride:
       '-fdr 0.01 -ptm_site_prob 0.75 -ptm_site_qvalue 0.01 -itol 20 -itolu ppm -rf -rf_rt_win auto -cor 0.8 -min_mz 200 -n_ion_min 2 -c_ion_min 2 -enzyme 2 -miss_c 1 -fixMod 1 -clip_n_m -minLength 7 -maxLength 35 -min_pep_mz 300 -max_pep_mz 1800 -min_pep_charge 2 -max_pep_charge 4 -lf_frag_mz_min 200 -lf_frag_mz_max 1800 -lf_top_n_frag 20 -lf_min_n_frag 2 -lf_frag_n_min 2 -tf all -nm -nf 4 -min_n 4 -valid -na 0 -ez -fast',
+    // Surfaced in every Carafe-enabled config so users see exactly which
+    // flags ran (and have a copy of the long default in front of them).
+    alwaysEmit: carafeEnabled,
     group: 'Carafe options',
   },
   {
@@ -566,10 +576,10 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Override the per-peptide variable-modification cap (e.g. -maxVar 1). Ignored when no variable modifications are included.',
     tier: 'advanced',
     widget: 'text',
-    visibleWhen: carafeEnabled,
-    enabledWhen: (s) =>
-      s.values['carafe.include_phosphorylation'] === true ||
-      s.values['carafe.include_oxidized_methionine'] === true,
+    visibleWhen: (s) =>
+      carafeEnabled(s) &&
+      (s.values['carafe.include_phosphorylation'] === true ||
+        s.values['carafe.include_oxidized_methionine'] === true),
     group: 'Carafe options',
   },
 
@@ -581,7 +591,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     section: 'fasta-skyline',
     label: 'Skyline template',
     help: 'Skyline document template (.sky.zip). If unset, the default template at default_skyline_template_file is fetched from GitHub.',
-    tier: 'common',
+    tier: 'advanced',
     widget: 'file-or-url',
   },
   {
@@ -607,7 +617,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Optional FASTA imported into the Skyline document instead of the main FASTA. Falls back to the main FASTA when unset.',
     tier: 'advanced',
     widget: 'file-or-url',
-    enabledWhen: (s) => s.values['skyline.skip'] !== true,
+    visibleWhen: (s) => s.values['skyline.skip'] !== true,
   },
   {
     path: 'skyline.skyr_file',
@@ -616,7 +626,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'One or more Skyline report-template (.skyr) files to apply at the end of the workflow. Local path or authenticated Panorama URL.',
     tier: 'advanced',
     widget: 'string-list',
-    enabledWhen: (s) => s.values['skyline.skip'] !== true,
+    visibleWhen: (s) => s.values['skyline.skip'] !== true,
   },
   {
     path: 'skyline.minimize',
@@ -625,7 +635,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Run the Skyline minimize step on the final document to shrink its size.',
     tier: 'advanced',
     widget: 'boolean',
-    enabledWhen: (s) => s.values['skyline.skip'] !== true,
+    visibleWhen: (s) => s.values['skyline.skip'] !== true,
   },
   {
     path: 'skyline.group_proteins',
@@ -634,7 +644,12 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Enable Skyline protein grouping.',
     tier: 'advanced',
     widget: 'boolean',
-    enabledWhen: (s) => s.values['skyline.skip'] !== true,
+    visibleWhen: skylineNotSkipped,
+    // Schema default is false; builder ships a "group by default" stance.
+    defaultOverride: true,
+    // Surfaced in every Skyline-running config so the protein-grouping stance
+    // is explicit in the generated file.
+    alwaysEmit: skylineNotSkipped,
   },
   {
     path: 'skyline.group_by_gene',
@@ -643,7 +658,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Group Skyline proteins by gene name.',
     tier: 'advanced',
     widget: 'boolean',
-    enabledWhen: (s) => s.values['skyline.skip'] !== true,
+    visibleWhen: skylineNotSkipped,
+    alwaysEmit: skylineNotSkipped,
   },
   {
     path: 'skyline.protein_parsimony',
@@ -652,7 +668,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Apply Skyline protein parsimony to remove redundant protein assignments.',
     tier: 'advanced',
     widget: 'boolean',
-    enabledWhen: (s) => s.values['skyline.skip'] !== true,
+    visibleWhen: skylineNotSkipped,
+    alwaysEmit: skylineNotSkipped,
   },
   {
     path: 'skyline.use_hardlinks',
@@ -661,7 +678,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Use hard links when staging files into the Skyline work directory. Disable on filesystems that do not support hard links.',
     tier: 'advanced',
     widget: 'boolean',
-    enabledWhen: (s) => s.values['skyline.skip'] !== true,
+    visibleWhen: (s) => s.values['skyline.skip'] !== true,
   },
 
   // =====================================================================
@@ -685,7 +702,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     section: 'msconvert',
     label: 'msconvert-only mode',
     help: 'Convert spectra with msconvert and exit before search, Skyline, QC, and Panorama upload of analysis outputs.',
-    tier: 'common',
+    tier: 'advanced',
     widget: 'boolean',
   },
   {
@@ -720,10 +737,15 @@ export const paramMetadata: readonly ParamMeta[] = [
     path: 'qc_report.skip',
     section: 'qc-reporting',
     label: 'Skip QC report',
-    help: 'Skip QC-report generation. Defaults to true; flip to false to run QC.',
+    help: 'Skip QC-report generation. The builder defaults this to off so QC runs unless you opt out.',
     tier: 'common',
     widget: 'boolean',
     group: 'QC report',
+    // The upstream schema defaults this to `true` (skip), but the builder
+    // ships a friendlier "run QC by default" stance. Paired with alwaysEmit
+    // so the override is written explicitly to the generated config.
+    defaultOverride: false,
+    alwaysEmit: true,
   },
   {
     path: 'qc_report.report_format',
@@ -732,7 +754,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Which QC report formats to render. Pick one or both of HTML and PDF.',
     tier: 'advanced',
     widget: 'multi-enum',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -742,7 +764,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Normalization applied to quantitative values shown in the QC report. Default is median; set DirectLFQ for DirectLFQ.',
     tier: 'advanced',
     widget: 'enum',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -752,7 +774,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Imputation strategy for missing values in the QC report. Currently only KNN is supported.',
     tier: 'advanced',
     widget: 'enum',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -762,7 +784,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Replicate names to exclude from normalization and batch correction.',
     tier: 'advanced',
     widget: 'string-list',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -772,7 +794,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Project / batch names to exclude from normalization and batch correction.',
     tier: 'advanced',
     widget: 'string-list',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -782,7 +804,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Protein names whose retention times are plotted in the QC report.',
     tier: 'advanced',
     widget: 'string-list',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -792,7 +814,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Replicate-metadata column names used to color the QC PCA plot.',
     tier: 'advanced',
     widget: 'string-list',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -802,7 +824,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Export normalized precursor and protein quantity matrices alongside the rendered QC report.',
     tier: 'advanced',
     widget: 'boolean',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -812,7 +834,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Skyline .skyr template used to export precursor-quality data for the QC report.',
     tier: 'advanced',
     widget: 'file-or-url',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -822,7 +844,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Skyline .skyr template used to export replicate-quality data for the QC report.',
     tier: 'advanced',
     widget: 'file-or-url',
-    enabledWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
   {
@@ -841,7 +863,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Replicate-metadata key for the first batch level. Falls back to the project name when unset.',
     tier: 'advanced',
     widget: 'text',
-    enabledWhen: (s) => s.values['batch_report.skip'] !== true,
+    visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
   {
@@ -851,7 +873,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Replicate-metadata key for the second batch level.',
     tier: 'advanced',
     widget: 'text',
-    enabledWhen: (s) => s.values['batch_report.skip'] !== true,
+    visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
   {
@@ -861,7 +883,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Replicate-metadata keys used as covariates for batch correction.',
     tier: 'advanced',
     widget: 'string-list',
-    enabledWhen: (s) => s.values['batch_report.skip'] !== true,
+    visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
   {
@@ -871,7 +893,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Replicate-metadata key indicating control replicates for CV-distribution plots.',
     tier: 'advanced',
     widget: 'text',
-    enabledWhen: (s) => s.values['batch_report.skip'] !== true,
+    visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
   {
@@ -881,7 +903,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Values of the control key marking a replicate as a control.',
     tier: 'advanced',
     widget: 'string-list',
-    enabledWhen: (s) => s.values['batch_report.skip'] !== true,
+    visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
   {
@@ -891,7 +913,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'File extension for standalone plots. Leave unset to skip standalone-plot output.',
     tier: 'advanced',
     widget: 'text',
-    enabledWhen: (s) => s.values['batch_report.skip'] !== true,
+    visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
 
@@ -915,7 +937,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     widget: 'text',
     requiredWhen: (s) => s.values['panorama.upload'] === true,
     placeholder: 'https://panoramaweb.org/_webdav/.../%40files/',
-    enabledWhen: (s) => s.values['panorama.upload'] === true,
+    visibleWhen: (s) => s.values['panorama.upload'] === true,
   },
   {
     path: 'panorama.import_skyline',
@@ -924,7 +946,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'After files upload, trigger Panorama to import the Skyline document into its internal database. Requires upload enabled and Skyline not skipped.',
     tier: 'advanced',
     widget: 'boolean',
-    enabledWhen: (s) =>
+    visibleWhen: (s) =>
       s.values['panorama.upload'] === true && s.values['skyline.skip'] !== true,
   },
   {
@@ -1028,4 +1050,13 @@ export function getEffectiveDefault(meta: ParamMeta): unknown {
   if (meta.defaultOverride !== undefined) return meta.defaultOverride;
   if (meta.virtual) return undefined;
   return schemaDerived[meta.path]?.defaultValue;
+}
+
+// Resolves whether a param is currently in always-emit mode given form state.
+// Boolean flags answer directly; predicates are evaluated against the state.
+export function isAlwaysEmit(meta: ParamMeta, state: FormState): boolean {
+  const ae = meta.alwaysEmit;
+  if (ae === true) return true;
+  if (typeof ae === 'function') return ae(state);
+  return false;
 }

@@ -1,11 +1,56 @@
 # nf-skyline-dia-ms config GUI
 
-A static single-page web app that helps users generate `nextflow.config` files for the
-[nf-skyline-dia-ms](https://github.com/mriffle/nf-skyline-dia-ms) DIA proteomics workflow.
+**Hosted app:** <https://mriffle.github.io/nf-skyline-dia-ms-config-gui/>
 
-The app is fully static. At runtime it does not fetch the workflow's `nextflow_schema.json` —
-schema-derived facts (types, defaults, enums) are baked into the bundle at build time via a
-codegen script, and the schema itself is vendored in this repo.
+A static single-page web app that helps users generate a `pipeline.config` Nextflow override
+file for the [nf-skyline-dia-ms](https://github.com/mriffle/nf-skyline-dia-ms) DIA proteomics
+workflow. Pass the downloaded file to Nextflow with `-c pipeline.config`.
+
+## Why this exists
+
+The workflow exposes ~99 user-facing parameters. Editing the config by hand is intimidating
+and error-prone — getting an option name or namespace wrong silently falls back to the default
+and there is no schema validation in the Nextflow runtime. This GUI presents the same
+parameters in a sectioned, validated form with inline help, conditional visibility, and a live
+preview of the generated Groovy config so users can copy or download a clean override.
+
+Outputs are **override files** — only values the user actually set are written. The workflow's
+own `nextflow.config` supplies every default, so the generated file stays minimal and easy to
+read. A small handful of load-bearing parameters (search engine, search-engine-specific flags,
+Skyline protein-grouping options, QC skip flag, etc.) are explicitly written even when
+untouched so the resulting config is self-documenting about what ran.
+
+## How it works
+
+The app is fully static — no backend, no runtime fetches. The workflow's
+`nextflow_schema.json` is **vendored** here at the repo root and baked into the bundle at
+build time. Architecture in three pieces:
+
+- **Schema-derived facts** (types, defaults, enums, hidden flags, min/max) come from the
+  vendored schema via a codegen script that emits a strongly-typed
+  `src/params/schemaDerived.generated.ts`.
+- **UX facts** (section, common-vs-advanced tier, help text, widget choice, conditional
+  visibility, conditional required-ness, conditional always-emit) are hand-authored in
+  `src/params/paramMetadata.ts`. The TypeScript compiler rejects entries that reference
+  schema paths that don't exist, and a coverage test fails if any non-hidden schema
+  parameter is left unaccounted for.
+- **Two output panes** share the same `FormState`:
+  - The **Config preview** runs a pure `emitConfig(state)` function that groups params by
+    section, builds a namespace tree, and emits Groovy with section banners and per-param
+    comments. Output is byte-stable given fixed version/timestamp so it can be tested with
+    golden files.
+  - The **Workflow graph** runs a pure `computeWorkflowGraph(state)` function that returns
+    nodes/edges for the DAG that would actually run given the current form state, rendered
+    as a hand-written SVG (no chart library). Unselected branches are omitted entirely
+    rather than greyed out.
+
+State is persisted to `localStorage` via Zustand. Form validation runs two layers on every
+change: per-widget Zod schemas (visible + touched fields only) and hand-written cross-field
+rules. The download/copy buttons gate on the validation report having no errors.
+
+The stack is intentionally lean: React + TypeScript + Vite + Tailwind + Zustand + Zod. No
+UI component libraries (Tailwind primitives only), no chart libraries, no state library other
+than Zustand.
 
 ## Local development
 
@@ -21,8 +66,9 @@ npm test             # run once
 npm run test:watch   # watch mode
 ```
 
-The suite covers the Groovy emitter (golden files), all 18 cross-field validation rules,
-the parameter-coverage gate, the store, and the trickiest UI widgets.
+The suite covers the Groovy emitter (golden files), every cross-field validation rule,
+workflow-graph scenarios, the parameter-coverage gate, the store, and the trickiest UI
+widgets.
 
 ## Type checking
 
@@ -54,15 +100,6 @@ npm run regen-schema
 Either way, the metadata-coverage test will fail if any new non-hidden schema parameter is
 unaccounted for in either `paramMetadata.ts` or the `IGNORED_PARAM_PATHS` allow-list — by design,
 so new parameters cannot quietly fall off the UI.
-
-## How parameters reach the UI
-
-- **Schema-derived facts** (types, defaults, enum values, hidden flag, min/max) →
-  vendored `nextflow_schema.json` → codegen → `src/params/schemaDerived.generated.ts`
-- **UX facts** (section, common-vs-advanced, help text, widget choice, conditional visibility) →
-  hand-authored in `src/params/paramMetadata.ts`
-- The two files are merged at type level; `paramMetadata.ts` references real schema paths and the
-  TypeScript compiler rejects typos.
 
 ## Production build
 
