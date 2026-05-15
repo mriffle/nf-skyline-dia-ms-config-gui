@@ -9,9 +9,6 @@ interface MakeStateInput {
   readonly values?: Record<string, unknown>;
 }
 
-// Mirrors the runtime default: createDefaultState seeds search_engine and
-// use_carafe. Tests that exercise specific scenarios should pass overrides
-// in `values`.
 function makeState(input: MakeStateInput = {}): FormState {
   const baseValues: Record<string, unknown> = {
     use_carafe: true,
@@ -31,112 +28,455 @@ function hasEdge(g: WorkflowGraph, from: string, to: string): boolean {
   return g.edges.some((e) => e.from === from && e.to === to);
 }
 
-describe('computeWorkflowGraph — empty initial state (general mode)', () => {
-  it('spectra is required-missing and FASTA is required-missing', () => {
-    const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
-    expect(nodeById(g, 'input.spectra')?.status).toBe('required-missing');
-    expect(nodeById(g, 'input.fasta')?.status).toBe('required-missing');
+// ---------------------------------------------------------------------------
+// Spectra preparation — msconvert / unzip conditionals
+// ---------------------------------------------------------------------------
+
+describe('computeWorkflowGraph — spectra preparation', () => {
+  it('all-mzml input runs neither msconvert nor unzip', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/data/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')).toBeUndefined();
+    expect(nodeById(g, 'process.unzip')).toBeUndefined();
+    expect(nodeById(g, 'output.wide-prepared')).toBeUndefined();
+    // Search consumes the input directly when no prep happened.
+    expect(hasEdge(g, 'input.spectra', 'process.diann')).toBe(true);
   });
 
+  it('raw input runs msconvert (DIA-NN, vendor-raw off)', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/data/wide.raw' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+    expect(nodeById(g, 'output.wide-prepared')).toBeDefined();
+    expect(hasEdge(g, 'input.spectra', 'process.msconvert')).toBe(true);
+    expect(hasEdge(g, 'output.wide-prepared', 'process.diann')).toBe(true);
+  });
+
+  it('use_vendor_raw=true + DIA-NN + raw skips msconvert', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'diann',
+          use_vendor_raw: true,
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/data/wide.raw' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')).toBeUndefined();
+    // No prepared output node — search consumes input directly.
+    expect(nodeById(g, 'output.wide-prepared')).toBeUndefined();
+    expect(hasEdge(g, 'input.spectra', 'process.diann')).toBe(true);
+  });
+
+  it('use_vendor_raw=true does NOT skip msconvert for EncyclopeDIA', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'encyclopedia',
+          use_vendor_raw: true,
+          fasta: '/db.fasta',
+          spectral_library: '/lib.dlib',
+          quant_spectra_dir: { kind: 'single', path: '/data/wide.raw' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+  });
+
+  it('.d.zip input runs unzip but not msconvert', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/data/wide.d.zip' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.unzip')?.status).toBe('active');
+    expect(nodeById(g, 'process.msconvert')).toBeUndefined();
+    expect(hasEdge(g, 'input.spectra', 'process.unzip')).toBe(true);
+  });
+
+  it('mixed .raw + .d.zip input runs both', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          fasta: '/db.fasta',
+          quant_spectra_dir: {
+            kind: 'list',
+            paths: ['/data/a.raw', '/data/b.d.zip'],
+          },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+    expect(nodeById(g, 'process.unzip')?.status).toBe('active');
+  });
+
+  it('PDC mode triggers msconvert (PDC files are vendor RAW)', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        mode: 'pdc',
+        values: {
+          use_carafe: false,
+          fasta: '/db.fasta',
+          'pdc.study_id': 'PDC000123',
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+  });
+
+  it('PDC mode + use_vendor_raw + DIA-NN skips msconvert', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        mode: 'pdc',
+        values: {
+          use_carafe: false,
+          search_engine: 'diann',
+          use_vendor_raw: true,
+          fasta: '/db.fasta',
+          'pdc.study_id': 'PDC000123',
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')).toBeUndefined();
+  });
+
+  it('directory input (uncertain types) shows msconvert conservatively', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/data/spectra' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+  });
+
+  it('msconvert_only mode renders msconvert unconditionally', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          msconvert_only: true,
+          quant_spectra_dir: { kind: 'single', path: '/data/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Carafe spectra preparation
+// ---------------------------------------------------------------------------
+
+describe('computeWorkflowGraph — Carafe spectra prep', () => {
+  it('Carafe spectra always need msconvert when RAW (vendor RAW does not help)', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: true,
+          search_engine: 'diann',
+          use_vendor_raw: true,
+          'carafe.source': 'file',
+          'carafe.spectra_file': '/dda/dda.raw',
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/wide.raw' },
+        },
+      }),
+    );
+    // Wide flow skips msconvert (DIA-NN + vendor RAW). But Carafe spectra
+    // still need conversion → msconvert is rendered to serve the Carafe
+    // stream. The output for the wide stream remains absent.
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+    expect(nodeById(g, 'output.wide-prepared')).toBeUndefined();
+    expect(nodeById(g, 'output.carafe-prepared')?.status).toBe('active');
+    expect(hasEdge(g, 'input.carafe-spectra', 'process.msconvert')).toBe(true);
+  });
+
+  it('Carafe with all-mzML input does not run msconvert', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: true,
+          'carafe.source': 'file',
+          'carafe.spectra_file': '/dda/dda.mzML',
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')).toBeUndefined();
+    expect(hasEdge(g, 'input.carafe-spectra', 'process.carafe')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Library prep — DIANN_BUILD_LIB and conversions
+// ---------------------------------------------------------------------------
+
+describe('computeWorkflowGraph — DIA-NN library prediction', () => {
+  it('DIA-NN with no library and no Carafe predicts library from FASTA', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'diann',
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.diann-build-lib')?.status).toBe('active');
+    expect(nodeById(g, 'output.predicted-library')?.status).toBe('active');
+    expect(hasEdge(g, 'input.fasta', 'process.diann-build-lib')).toBe(true);
+    expect(hasEdge(g, 'output.predicted-library', 'process.diann')).toBe(true);
+    // input.library should be hidden entirely (not required, not set).
+    expect(nodeById(g, 'input.library')).toBeUndefined();
+  });
+
+  it('DIA-NN with user library skips prediction', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'diann',
+          fasta: '/db.fasta',
+          spectral_library: '/lib.tsv',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.diann-build-lib')).toBeUndefined();
+    expect(hasEdge(g, 'input.library', 'process.diann')).toBe(true);
+  });
+
+  it('DIA-NN with Carafe skips prediction (Carafe supplies the library)', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: true,
+          'carafe.source': 'file',
+          'carafe.spectra_file': '/dda.mzML',
+          search_engine: 'diann',
+          fasta: '/db.fasta',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.diann-build-lib')).toBeUndefined();
+    expect(hasEdge(g, 'output.carafe-library', 'process.diann')).toBe(true);
+  });
+});
+
+describe('computeWorkflowGraph — library format conversions', () => {
+  it('user .blib + EncyclopeDIA runs blib-to-dlib (no further conversion)', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'encyclopedia',
+          fasta: '/db.fasta',
+          spectral_library: '/user.blib',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.blib-to-dlib')?.status).toBe('active');
+    expect(nodeById(g, 'output.converted-dlib')?.status).toBe('active');
+    expect(nodeById(g, 'process.dlib-to-tsv')).toBeUndefined();
+    expect(hasEdge(g, 'output.converted-dlib', 'process.encyclopedia')).toBe(true);
+  });
+
+  it('user .blib + DIA-NN runs both blib-to-dlib and dlib-to-tsv', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'diann',
+          fasta: '/db.fasta',
+          spectral_library: '/user.blib',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.blib-to-dlib')?.status).toBe('active');
+    expect(nodeById(g, 'process.dlib-to-tsv')?.status).toBe('active');
+    expect(nodeById(g, 'output.tsv-library')?.status).toBe('active');
+    expect(hasEdge(g, 'output.converted-dlib', 'process.dlib-to-tsv')).toBe(true);
+    expect(hasEdge(g, 'output.tsv-library', 'process.diann')).toBe(true);
+  });
+
+  it('user .dlib + DIA-NN runs only dlib-to-tsv', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'diann',
+          fasta: '/db.fasta',
+          spectral_library: '/user.dlib',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.blib-to-dlib')).toBeUndefined();
+    expect(nodeById(g, 'process.dlib-to-tsv')?.status).toBe('active');
+    expect(hasEdge(g, 'input.library', 'process.dlib-to-tsv')).toBe(true);
+  });
+
+  it('user .tsv + DIA-NN runs no conversions', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'diann',
+          fasta: '/db.fasta',
+          spectral_library: '/user.tsv',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.blib-to-dlib')).toBeUndefined();
+    expect(nodeById(g, 'process.dlib-to-tsv')).toBeUndefined();
+    expect(hasEdge(g, 'input.library', 'process.diann')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Narrow-window pre-search
+// ---------------------------------------------------------------------------
+
+describe('computeWorkflowGraph — narrow-window pre-search', () => {
+  it('EncyclopeDIA + narrow runs Build chrom. library; wide consumes the .elib', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'encyclopedia',
+          fasta: '/db.fasta',
+          spectral_library: '/user.dlib',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+          chromatogram_library_spectra_dir: '/data/narrow.mzML',
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.narrow-elib')?.status).toBe('active');
+    expect(nodeById(g, 'output.chrom-library')?.status).toBe('active');
+    expect(hasEdge(g, 'output.chrom-library', 'process.encyclopedia')).toBe(true);
+  });
+
+  it('DIA-NN + narrow runs DIA-NN narrow search; wide consumes refined library', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'diann',
+          fasta: '/db.fasta',
+          spectral_library: '/user.tsv',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+          chromatogram_library_spectra_dir: '/data/narrow.mzML',
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.diann-narrow')?.status).toBe('active');
+    expect(nodeById(g, 'output.narrow-library')?.status).toBe('active');
+    expect(hasEdge(g, 'output.narrow-library', 'process.diann')).toBe(true);
+  });
+
+  it('Cascadia ignores narrow-window spectra (no narrow node, no input.narrow)', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'cascadia',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+          chromatogram_library_spectra_dir: '/data/narrow.mzML',
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.narrow-elib')).toBeUndefined();
+    expect(nodeById(g, 'process.diann-narrow')).toBeUndefined();
+    expect(nodeById(g, 'input.narrow')).toBeUndefined();
+  });
+
+  it('narrow .raw input runs msconvert before narrow search', () => {
+    const g = computeWorkflowGraph(
+      makeState({
+        values: {
+          use_carafe: false,
+          search_engine: 'encyclopedia',
+          fasta: '/db.fasta',
+          spectral_library: '/user.dlib',
+          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+          chromatogram_library_spectra_dir: '/data/narrow.raw',
+        },
+      }),
+    );
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+    expect(nodeById(g, 'output.narrow-prepared')?.status).toBe('active');
+    expect(hasEdge(g, 'input.narrow', 'process.msconvert')).toBe(true);
+    expect(hasEdge(g, 'output.narrow-prepared', 'process.narrow-elib')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Search engine selection
+// ---------------------------------------------------------------------------
+
+describe('computeWorkflowGraph — search engine selection', () => {
   it('only the selected DIA-NN engine appears; other engines are omitted', () => {
     const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
     expect(nodeById(g, 'process.diann')?.status).toBe('active');
     expect(nodeById(g, 'process.encyclopedia')).toBeUndefined();
     expect(nodeById(g, 'process.cascadia')).toBeUndefined();
-    expect(nodeById(g, 'output.encyclopedia-results')).toBeUndefined();
-    expect(nodeById(g, 'output.cascadia-results')).toBeUndefined();
-    expect(nodeById(g, 'output.cascadia-fasta')).toBeUndefined();
   });
 
-  it('always includes prepare-spectra, prepared-spectra output, and Skyline build', () => {
-    const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
-    expect(nodeById(g, 'process.prepare-spectra')).toBeDefined();
-    expect(nodeById(g, 'output.prepared-spectra')).toBeDefined();
-    expect(nodeById(g, 'process.skyline')).toBeDefined();
-  });
-
-  it('Skyline template appears as active with "Default template" label when unset', () => {
-    const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
-    const tmpl = nodeById(g, 'input.skyline-template');
-    expect(tmpl?.status).toBe('active');
-    expect(tmpl?.label).toBe('Default template');
-  });
-});
-
-describe('computeWorkflowGraph — DIA-NN scenarios', () => {
-  it('with FASTA and spectra filled, both inputs become active', () => {
-    const g = computeWorkflowGraph(
-      makeState({
-        values: {
-          use_carafe: false,
-          fasta: '/db.fasta',
-          quant_spectra_dir: { kind: 'single', path: '/data/wide.mzML' },
-        },
-      }),
-    );
-    expect(nodeById(g, 'input.fasta')?.status).toBe('active');
-    expect(nodeById(g, 'input.spectra')?.status).toBe('active');
-  });
-
-  it('library is omitted entirely for DIA-NN when unset (it is optional)', () => {
-    const g = computeWorkflowGraph(
-      makeState({
-        values: {
-          use_carafe: false,
-          fasta: '/db.fasta',
-          quant_spectra_dir: { kind: 'single', path: '/data/wide.mzML' },
-        },
-      }),
-    );
-    expect(nodeById(g, 'input.library')).toBeUndefined();
-  });
-
-  it('library appears as active for DIA-NN when user has set one', () => {
-    const g = computeWorkflowGraph(
-      makeState({
-        values: {
-          use_carafe: false,
-          spectral_library: '/libs/human.dlib',
-        },
-      }),
-    );
-    expect(nodeById(g, 'input.library')?.status).toBe('active');
-  });
-});
-
-describe('computeWorkflowGraph — EncyclopeDIA selected', () => {
-  it('library required-missing; only encyclopedia process present', () => {
+  it('EncyclopeDIA: library is required-missing when unset', () => {
     const g = computeWorkflowGraph(
       makeState({ values: { use_carafe: false, search_engine: 'encyclopedia' } }),
     );
     expect(nodeById(g, 'input.library')?.status).toBe('required-missing');
     expect(nodeById(g, 'process.encyclopedia')?.status).toBe('active');
     expect(nodeById(g, 'process.diann')).toBeUndefined();
-    expect(nodeById(g, 'process.cascadia')).toBeUndefined();
   });
-});
 
-describe('computeWorkflowGraph — Cascadia selected', () => {
-  it('FASTA hidden, library hidden, only Cascadia present, generated FASTA output present', () => {
+  it('Cascadia: FASTA hidden, library hidden, generated FASTA appears', () => {
     const g = computeWorkflowGraph(
       makeState({ values: { use_carafe: false, search_engine: 'cascadia' } }),
     );
     expect(nodeById(g, 'input.fasta')).toBeUndefined();
     expect(nodeById(g, 'input.library')).toBeUndefined();
     expect(nodeById(g, 'process.cascadia')?.status).toBe('active');
-    expect(nodeById(g, 'process.diann')).toBeUndefined();
-    expect(nodeById(g, 'process.encyclopedia')).toBeUndefined();
     expect(nodeById(g, 'output.cascadia-fasta')?.status).toBe('active');
-  });
-
-  it('Skyline takes Cascadia FASTA, not user FASTA', () => {
-    const g = computeWorkflowGraph(
-      makeState({ values: { use_carafe: false, search_engine: 'cascadia' } }),
-    );
     expect(hasEdge(g, 'output.cascadia-fasta', 'process.skyline')).toBe(true);
-    expect(hasEdge(g, 'input.fasta', 'process.skyline')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PDC mode
+// ---------------------------------------------------------------------------
 
 describe('computeWorkflowGraph — PDC mode', () => {
   it('spectra source uses pdc.study_id; replicate metadata node is hidden', () => {
@@ -152,26 +492,24 @@ describe('computeWorkflowGraph — PDC mode', () => {
     const g = computeWorkflowGraph(makeState({ mode: 'pdc', values: { use_carafe: false } }));
     expect(nodeById(g, 'input.spectra')?.status).toBe('required-missing');
   });
-});
 
-describe('computeWorkflowGraph — Carafe enabled', () => {
-  it('Carafe process and input nodes appear; user-library node is omitted', () => {
+  it('PDC mode runs Skyline Annotate (PDC supplies metadata)', () => {
     const g = computeWorkflowGraph(
       makeState({
-        values: {
-          use_carafe: true,
-          'carafe.source': 'file',
-        },
+        mode: 'pdc',
+        values: { use_carafe: false, 'pdc.study_id': 'PDC000123', fasta: '/db.fasta' },
       }),
     );
-    expect(nodeById(g, 'process.carafe')?.status).toBe('active');
-    expect(nodeById(g, 'input.carafe-spectra')?.status).toBe('required-missing');
-    expect(nodeById(g, 'output.carafe-library')?.status).toBe('active');
-    expect(nodeById(g, 'input.library')).toBeUndefined();
-    expect(hasEdge(g, 'output.carafe-library', 'process.diann')).toBe(true);
+    expect(nodeById(g, 'process.skyline-annotate')?.status).toBe('active');
   });
+});
 
-  it('Carafe input becomes active when source=file and spectra_file set', () => {
+// ---------------------------------------------------------------------------
+// Carafe enabled
+// ---------------------------------------------------------------------------
+
+describe('computeWorkflowGraph — Carafe enabled', () => {
+  it('Carafe runs and supplies the library; user-library node is omitted', () => {
     const g = computeWorkflowGraph(
       makeState({
         values: {
@@ -181,26 +519,43 @@ describe('computeWorkflowGraph — Carafe enabled', () => {
         },
       }),
     );
-    expect(nodeById(g, 'input.carafe-spectra')?.status).toBe('active');
+    expect(nodeById(g, 'process.carafe')?.status).toBe('active');
+    expect(nodeById(g, 'output.carafe-library')?.status).toBe('active');
+    expect(nodeById(g, 'input.library')).toBeUndefined();
+    expect(hasEdge(g, 'output.carafe-library', 'process.diann')).toBe(true);
+  });
+
+  it('Carafe input not set → required-missing', () => {
+    const g = computeWorkflowGraph(
+      makeState({ values: { use_carafe: true, 'carafe.source': 'file' } }),
+    );
+    expect(nodeById(g, 'input.carafe-spectra')?.status).toBe('required-missing');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Replicate metadata / skyr report
+// ---------------------------------------------------------------------------
 
 describe('computeWorkflowGraph — replicate metadata', () => {
   it('hidden when unset', () => {
     const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
     expect(nodeById(g, 'input.replicate-metadata')).toBeUndefined();
+    expect(nodeById(g, 'process.skyline-annotate')).toBeUndefined();
   });
 
-  it('appears as active when set', () => {
+  it('appears as active when set, and Annotate process runs', () => {
     const g = computeWorkflowGraph(
       makeState({ values: { use_carafe: false, replicate_metadata: '/meta.tsv' } }),
     );
     expect(nodeById(g, 'input.replicate-metadata')?.status).toBe('active');
+    expect(nodeById(g, 'process.skyline-annotate')?.status).toBe('active');
+    expect(hasEdge(g, 'input.replicate-metadata', 'process.skyline-annotate')).toBe(true);
   });
 });
 
 describe('computeWorkflowGraph — skyr report definitions', () => {
-  it('skyr input and Skyline-reports process are both hidden when skyr unset', () => {
+  it('hidden when unset', () => {
     const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
     expect(nodeById(g, 'input.skyr')).toBeUndefined();
     expect(nodeById(g, 'process.skyline-reports')).toBeUndefined();
@@ -215,8 +570,31 @@ describe('computeWorkflowGraph — skyr report definitions', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Skyline minimize
+// ---------------------------------------------------------------------------
+
+describe('computeWorkflowGraph — Skyline minimize', () => {
+  it('hidden by default', () => {
+    const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
+    expect(nodeById(g, 'process.skyline-minimize')).toBeUndefined();
+  });
+
+  it('appears when skyline.minimize=true', () => {
+    const g = computeWorkflowGraph(
+      makeState({ values: { use_carafe: false, 'skyline.minimize': true } }),
+    );
+    expect(nodeById(g, 'process.skyline-minimize')?.status).toBe('active');
+    expect(nodeById(g, 'output.skyline-minimized')?.status).toBe('active');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// msconvert_only / skyline.skip / panorama
+// ---------------------------------------------------------------------------
+
 describe('computeWorkflowGraph — msconvert_only', () => {
-  it('only spectra → prepare → prepared-spectra remain; everything else gone', () => {
+  it('only spectra prep nodes remain; everything downstream gone', () => {
     const g = computeWorkflowGraph(
       makeState({
         values: {
@@ -226,24 +604,27 @@ describe('computeWorkflowGraph — msconvert_only', () => {
       }),
     );
     expect(nodeById(g, 'input.spectra')?.status).toBe('active');
-    expect(nodeById(g, 'process.prepare-spectra')?.status).toBe('active');
-    expect(nodeById(g, 'output.prepared-spectra')?.status).toBe('active');
-    expect(nodeById(g, 'input.fasta')).toBeUndefined();
-    expect(nodeById(g, 'input.library')).toBeUndefined();
-    expect(nodeById(g, 'input.skyline-template')).toBeUndefined();
+    expect(nodeById(g, 'process.msconvert')?.status).toBe('active');
+    expect(nodeById(g, 'output.wide-prepared')?.status).toBe('active');
     expect(nodeById(g, 'process.diann')).toBeUndefined();
-    expect(nodeById(g, 'process.encyclopedia')).toBeUndefined();
-    expect(nodeById(g, 'process.cascadia')).toBeUndefined();
     expect(nodeById(g, 'process.skyline')).toBeUndefined();
     expect(nodeById(g, 'process.qc-report')).toBeUndefined();
+    expect(nodeById(g, 'input.fasta')).toBeUndefined();
+    expect(nodeById(g, 'input.skyline-template')).toBeUndefined();
   });
 
   it('panorama upload still attaches when enabled', () => {
     const g = computeWorkflowGraph(
-      makeState({ values: { msconvert_only: true, 'panorama.upload': true } }),
+      makeState({
+        values: {
+          msconvert_only: true,
+          'panorama.upload': true,
+          quant_spectra_dir: { kind: 'single', path: '/data/wide.raw' },
+        },
+      }),
     );
     expect(nodeById(g, 'process.panorama-upload')?.status).toBe('active');
-    expect(hasEdge(g, 'output.prepared-spectra', 'process.panorama-upload')).toBe(true);
+    expect(hasEdge(g, 'output.wide-prepared', 'process.panorama-upload')).toBe(true);
   });
 });
 
@@ -254,53 +635,37 @@ describe('computeWorkflowGraph — skyline.skip', () => {
     );
     expect(nodeById(g, 'process.skyline')).toBeUndefined();
     expect(nodeById(g, 'output.skyline-doc')).toBeUndefined();
+    expect(nodeById(g, 'process.skyline-annotate')).toBeUndefined();
+    expect(nodeById(g, 'process.skyline-minimize')).toBeUndefined();
     expect(nodeById(g, 'process.qc-report')).toBeUndefined();
     expect(nodeById(g, 'process.batch-report')).toBeUndefined();
-    expect(nodeById(g, 'process.skyline-reports')).toBeUndefined();
     expect(nodeById(g, 'input.skyline-template')).toBeUndefined();
-    expect(nodeById(g, 'input.skyr')).toBeUndefined();
-    expect(nodeById(g, 'input.replicate-metadata')).toBeUndefined();
   });
 });
 
 describe('computeWorkflowGraph — panorama upload', () => {
-  it('node appears and aggregates from prepared spectra, search results, Skyline doc', () => {
+  it('aggregates from prepared spectra (when present), search results, Skyline doc', () => {
     const g = computeWorkflowGraph(
       makeState({
         values: {
           use_carafe: false,
+          search_engine: 'diann',
           'panorama.upload': true,
           fasta: '/db.fasta',
-          quant_spectra_dir: { kind: 'single', path: '/data/wide.mzML' },
+          quant_spectra_dir: { kind: 'single', path: '/data/wide.raw' },
         },
       }),
     );
     expect(nodeById(g, 'process.panorama-upload')?.status).toBe('active');
-    expect(hasEdge(g, 'output.prepared-spectra', 'process.panorama-upload')).toBe(true);
+    expect(hasEdge(g, 'output.wide-prepared', 'process.panorama-upload')).toBe(true);
     expect(hasEdge(g, 'output.diann-results', 'process.panorama-upload')).toBe(true);
     expect(hasEdge(g, 'output.skyline-doc', 'process.panorama-upload')).toBe(true);
   });
 });
 
-describe('computeWorkflowGraph — narrow-window spectra', () => {
-  it('shown when set and search engine is encyclopedia or diann', () => {
-    const g = computeWorkflowGraph(
-      makeState({
-        values: {
-          use_carafe: false,
-          search_engine: 'encyclopedia',
-          chromatogram_library_spectra_dir: '/data/narrow',
-        },
-      }),
-    );
-    expect(nodeById(g, 'input.narrow')?.status).toBe('active');
-  });
-
-  it('hidden when not set', () => {
-    const g = computeWorkflowGraph(makeState({ values: { use_carafe: false } }));
-    expect(nodeById(g, 'input.narrow')).toBeUndefined();
-  });
-});
+// ---------------------------------------------------------------------------
+// Invariants
+// ---------------------------------------------------------------------------
 
 describe('computeWorkflowGraph — node-status invariant', () => {
   it('every node is either "active" or "required-missing"', () => {
@@ -311,7 +676,7 @@ describe('computeWorkflowGraph — node-status invariant', () => {
           'carafe.source': 'dir',
           'carafe.spectra_dir': '/dda',
           fasta: '/db.fasta',
-          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+          quant_spectra_dir: { kind: 'single', path: '/wide.raw' },
           'panorama.upload': true,
         },
       }),
@@ -323,15 +688,19 @@ describe('computeWorkflowGraph — node-status invariant', () => {
 });
 
 describe('computeWorkflowGraph — edge integrity', () => {
-  it('every edge endpoint resolves to a node', () => {
+  it('every edge endpoint resolves to a node (complex scenario)', () => {
     const g = computeWorkflowGraph(
       makeState({
         values: {
-          use_carafe: true,
-          'carafe.source': 'dir',
-          'carafe.spectra_dir': '/dda',
+          use_carafe: false,
+          search_engine: 'diann',
           fasta: '/db.fasta',
-          quant_spectra_dir: { kind: 'single', path: '/wide.mzML' },
+          spectral_library: '/user.blib',
+          quant_spectra_dir: { kind: 'single', path: '/wide.raw' },
+          chromatogram_library_spectra_dir: '/data/narrow.raw',
+          replicate_metadata: '/m.tsv',
+          'skyline.minimize': true,
+          'skyline.skyr_file': '/r.skyr',
           'panorama.upload': true,
         },
       }),

@@ -282,6 +282,28 @@ filename when set.
 adds a new conditional process, edit `computeWorkflowGraph.ts` and add a
 matching scenario test in `__tests__/computeWorkflowGraph.test.ts`.
 
+**Sub-process granularity** — the graph models conditional sub-processes that
+actually fire, not just top-level branches:
+- `Convert to mzML` (msconvert) appears only when RAW files are present AND
+  not (`search_engine == 'diann'` AND `use_vendor_raw == true`). Carafe spectra
+  always trigger msconvert for RAW (Carafe ignores `use_vendor_raw`).
+- `Extract Bruker` (unzip) appears only when `.d.zip` files are present.
+  EncyclopeDIA/Cascadia don't accept `.d.zip` so the node is suppressed for
+  them.
+- `Predict library (DIA-NN)` appears only when DIA-NN runs without a
+  user library and without Carafe.
+- `Convert .blib → .dlib` and `Convert .dlib → TSV` appear when the user's
+  library file extension forces them.
+- Narrow-window pre-search (`Build chrom. library` for EncyclopeDIA, or
+  `DIA-NN narrow search`) appears when `chromatogram_library_spectra_dir` is
+  set and the engine supports it (Cascadia ignores it).
+- `Annotate doc` appears when replicate metadata is set or in PDC mode.
+- `Minimize doc` appears only when `skyline.minimize == true`.
+
+File types are inferred from spectra paths' extensions (`.raw`, `.mzML`,
+`.d.zip`); when types can't be determined (directory without glob) the
+detector returns `uncertain` which conservatively triggers msconvert.
+
 **Carafe override**: when `use_carafe === true`, the user spectral-library
 input node is omitted entirely (Carafe overrides `params.spectral_library`
 in the workflow with a warning). The library-consuming process gets its
@@ -331,7 +353,7 @@ so the coverage test sees them as accounted for.
 7. **All emit output is byte-stable** given fixed `version` + `timestamp`
    options. Don't introduce nondeterminism (Sets, Map iteration, etc.) in
    the emit pipeline.
-8. **Bundle budget**: keep gzipped JS under ~150 KB. Currently ~86 KB.
+8. **Bundle budget**: keep gzipped JS under ~150 KB. Currently ~88 KB.
 9. **Schema lives at the repo root** (`./nextflow_schema.json`), not at
    `../nextflow_schema.json` — this repo is standalone, not a subfolder.
 
@@ -474,7 +496,7 @@ When you add an `alwaysEmit` field:
 | Zustand store internals              | LIGHT   | Smoke + mode-switch behavior         |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **263 tests across 17 files**. Run `npm test` before pushing.
+Current count: **280 tests across 17 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
