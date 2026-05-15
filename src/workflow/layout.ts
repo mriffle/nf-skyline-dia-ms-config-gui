@@ -13,6 +13,7 @@ export const PADDING = 24;
 export interface PositionedNode extends GraphNode {
   readonly x: number; // center x
   readonly y: number; // center y
+  readonly row: number; // contiguous row index (re-indexed from stage)
 }
 
 export interface LayoutResult {
@@ -67,7 +68,7 @@ export function layoutGraph(graph: WorkflowGraph): LayoutResult {
     const y = PADDING + NODE_HEIGHT / 2 + row * (NODE_HEIGHT + VERTICAL_GAP);
     nodes.forEach((n, i) => {
       const x = startX + NODE_WIDTH / 2 + i * (NODE_WIDTH + HORIZONTAL_GAP);
-      positioned.push({ ...n, x, y });
+      positioned.push({ ...n, x, y, row });
     });
   }
 
