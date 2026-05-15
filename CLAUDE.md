@@ -221,19 +221,44 @@ Warnings render in the summary but do not block.
 Pure function `emitConfig(state, options?) → string`. Highest-stakes
 correctness boundary in the app. Order of operations:
 
-1. Filter to touched entries (in `paramMetadata` order).
+1. Filter to touched entries (plus any `alwaysEmit` paths).
 2. Normalize the `quant_spectra_dir` tagged union (`{kind: 'single'|'list'|'batch-map', ...}`)
    to its concrete shape.
 3. Skip *virtual* entries that don't write a real path.
-4. Group by namespace prefix.
-5. Emit **block form** (`pdc { ... }`) when a namespace has ≥2 emitted
-   children; dotted form (`pdc.study_id = 'X'`) otherwise.
+4. **Group entries by UI section** (in `sections.ts` order). Sections with
+   no emitted entries are dropped.
+5. Within each section, build a namespace tree and emit:
+   - **block form** (`pdc { ... }`) when a namespace has ≥2 emitted
+     children at the same level, otherwise dotted form (`pdc.study_id = 'X'`).
+   - a section banner comment (`// === Title === \n // blurb…`) before
+     the section's contents.
+   - a per-param comment (`// Label — help text…`) above every leaf
+     assignment, wrapped at `COMMENT_BODY_WIDTH` (81 cols of content
+     after the `// ` prefix). Affected sub-paths without their own
+     metadata entry (e.g. `quant_spectra_glob`) are emitted without a
+     per-param comment.
 6. Always prepend the header comment with version + UTC timestamp.
+
+Ordering is **section-driven, then metadata-order within a section**.
+There is no longer any "scalars first" hoisting at the top of `params { }`
+— a `pdc { ... }` block now appears wherever the input-pdc section
+falls, even if other sections contain only scalars.
+
+Each namespace prefix (`pdc.`, `carafe.`, `encyclopedia.`, …) currently
+lives in exactly one section. If you add a parameter that breaks this
+invariant, the same namespace would render as two separate blocks (e.g.
+`pdc { ... }` twice in different sections). Groovy DSL accepts this but
+it's noisy — prefer assigning new params to the section that owns their
+namespace.
 
 Tested via **golden files** in `src/emit/__tests__/golden/*.config`. To add
 a scenario: create a new `.config` file, add a test that constructs the
 matching state via `makeState({...})` and asserts equality with the file.
 Output is byte-stable when `version` and `timestamp` are passed as options.
+When you change anything that affects rendering (e.g. wording of a
+section blurb, label, or help text; section order; banner format) you
+must regenerate every golden — a tiny temporary test that writes
+`emit(state)` to disk is the fastest way to do this.
 
 ### 7. Workflow graph (live DAG visualization)
 
@@ -487,8 +512,13 @@ When you add an `alwaysEmit` field:
   correct Groovy shape.
 - **Don't commit `tsconfig.tsbuildinfo`** (it's in `.gitignore` but rsync
   can drag it in if you ever copy from elsewhere).
-- **Empty `params { }` block** is intentional when nothing is touched.
-  The emitter produces `params { }` on one line in that case.
+- **Empty `params { }` block** is intentional when nothing is touched
+  (and no `alwaysEmit` paths produce a value). The emitter produces
+  `params { }` on one line in that case.
+- **Section blurbs and per-param `label`/`help` text are emitted into
+  the generated config as comments** by the emitter. Edits to
+  `sections.ts` blurbs or to `paramMetadata.ts` label/help strings will
+  invalidate every emit golden — regenerate them after any such change.
 - **Known upstream schema/config drift**: `nextflow_schema.json` declares
   `carafe.cli_options.default = ""`, but the workflow's `nextflow.config`
   defines a long real default. We work around it locally via

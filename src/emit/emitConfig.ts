@@ -1,17 +1,24 @@
 // Pure function: FormState -> Nextflow override-config string.
 //
 // Pipeline:
-//   1. Collect (path, value) entries from state.values filtered by touched.
+//   1. Collect (path, value) entries from state.values filtered by touched
+//      (plus alwaysEmit paths).
 //   2. Normalize tagged-union values (quant_spectra_dir variants).
-//   3. Drop entries whose path is a virtual paramMetadata entry (the
-//      virtual writes to its `affects` set; only the real underlying
-//      paths reach us as touched entries).
-//   4. Order entries by paramMetadata appearance; unknown paths go last
-//      in alphabetical order.
-//   5. Build a namespace tree and render it into the params { } body.
+//   3. Drop entries whose path is a virtual paramMetadata entry that does
+//      not write back to itself.
+//   4. Group entries by UI section (in section order from sections.ts).
+//   5. Within each section, build a namespace tree and render it.
+//   6. Each section emits a banner comment (title + blurb); each emitted
+//      leaf (or dotted-collapsed leaf) emits a comment with its label +
+//      help text just above the assignment.
+//
+// Output ordering is now section-driven (matching the form UI), not
+// "scalars-first" as it was previously. Order within a section follows
+// paramMetadata order.
 
-import type { FormState } from '../params/paramMetadata';
-import { paramMetadata, getEffectiveDefault } from '../params/paramMetadata';
+import type { FormState, ParamMeta, SectionId } from '../params/paramMetadata';
+import { paramMetadata, paramMetadataByPath, getEffectiveDefault } from '../params/paramMetadata';
+import { sections, type Section } from '../params/sections';
 import { toGroovyLiteral } from './groovyLiteral';
 import {
   buildNamespaceTree,
@@ -27,6 +34,13 @@ export interface EmitOptions {
   readonly version?: string;
   readonly timestamp?: Date;
 }
+
+// Maximum content width per comment line, measured AFTER the indent and
+// the leading "// ". Total rendered line ~= indent + 3 + this value.
+const COMMENT_BODY_WIDTH = 81;
+
+// Width of the '=' bars in section banner comments (content only).
+const BANNER_BAR_WIDTH = 72;
 
 // ---------------------------------------------------------------------------
 // Param ordering & virtual handling
@@ -116,9 +130,8 @@ function collectEntries(state: FormState): OrderedEntry[] {
     consider(path, state.values[path]);
   }
 
-  // 2. AlwaysEmit paths. The value comes from state.values if present
-  // (even when not touched — e.g. seeded by createDefaultState); otherwise
-  // we fall back to the metadata's effective default.
+  // 2. AlwaysEmit paths. Value from state.values if present (even untouched —
+  // e.g. seeded by createDefaultState); otherwise the effective default.
   for (const meta of paramMetadata) {
     if (meta.alwaysEmit !== true) continue;
     if (seenPaths.has(meta.path)) continue;
@@ -127,8 +140,6 @@ function collectEntries(state: FormState): OrderedEntry[] {
     consider(meta.path, rawValue);
   }
 
-  // Stable sort: metadata order first, then alphabetical for unknowns
-  // (which share Infinity).
   entries.sort((a, b) => {
     if (a.order !== b.order) return a.order - b.order;
     return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
@@ -136,54 +147,106 @@ function collectEntries(state: FormState): OrderedEntry[] {
   return entries;
 }
 
-// ---------------------------------------------------------------------------
-// Tree rendering
-// ---------------------------------------------------------------------------
+interface SectionEntries {
+  readonly section: Section;
+  readonly entries: OrderedEntry[];
+}
 
-/**
- * Render a list of TreeNodes at the given indent level. At a branch with
- * exactly one direct child the recursion collapses the segment to dotted
- * form; multi-child branches become `name { … }` blocks.
- *
- * If `scalarsFirst` is true (used for the top-level `params { }` body
- * per the spec), leaves are emitted before branches; otherwise nodes
- * are emitted strictly in paramMetadata order.
- */
-function renderNodes(
-  nodes: readonly TreeNode[],
-  level: number,
-  scalarsFirst: boolean,
-): string[] {
-  const ordered = scalarsFirst ? splitScalarsFirst(nodes) : sortedByOrder(nodes);
-  const out: string[] = [];
-  for (const node of ordered) {
-    if (node.kind === 'leaf') {
-      out.push(renderAssignment(node.path.split('.').pop()!, node.value, level));
-    } else {
-      out.push(...renderBranch(node, level));
-    }
+function groupBySection(entries: readonly OrderedEntry[]): SectionEntries[] {
+  const bySectionId = new Map<SectionId, OrderedEntry[]>();
+  for (const entry of entries) {
+    const meta = paramMetadataByPath[entry.path];
+    if (!meta) continue;
+    const bucket = bySectionId.get(meta.section);
+    if (bucket) bucket.push(entry);
+    else bySectionId.set(meta.section, [entry]);
+  }
+  const out: SectionEntries[] = [];
+  for (const section of sections) {
+    const e = bySectionId.get(section.id);
+    if (!e || e.length === 0) continue;
+    out.push({ section, entries: e });
   }
   return out;
 }
 
-function sortedByOrder(nodes: readonly TreeNode[]): TreeNode[] {
-  return [...nodes].sort((a, b) => a.order - b.order);
+// ---------------------------------------------------------------------------
+// Comment rendering helpers
+// ---------------------------------------------------------------------------
+
+function wrapCommentLines(text: string, level: number): string[] {
+  const indent = INDENT.repeat(level);
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [];
+  const out: string[] = [];
+  let current = '';
+  for (const w of words) {
+    if (current.length === 0) {
+      current = w;
+    } else if (current.length + 1 + w.length <= COMMENT_BODY_WIDTH) {
+      current = `${current} ${w}`;
+    } else {
+      out.push(current);
+      current = w;
+    }
+  }
+  if (current.length > 0) out.push(current);
+  return out.map((line) => `${indent}// ${line}`);
 }
 
-function splitScalarsFirst(nodes: readonly TreeNode[]): TreeNode[] {
-  const leaves = nodes
-    .filter((n): n is Extract<TreeNode, { kind: 'leaf' }> => n.kind === 'leaf')
-    .sort((a, b) => a.order - b.order);
-  const branches = nodes
-    .filter((n): n is Extract<TreeNode, { kind: 'branch' }> => n.kind === 'branch')
-    .sort((a, b) => a.order - b.order);
-  return [...leaves, ...branches];
+function renderSectionBanner(section: Section, level: number): string[] {
+  const indent = INDENT.repeat(level);
+  const bar = `${indent}// ${'='.repeat(BANNER_BAR_WIDTH)}`;
+  const titleLine = `${indent}// ${section.title}`;
+  const blurbLines = wrapCommentLines(section.blurb, level);
+  return [bar, titleLine, bar, ...blurbLines];
 }
+
+function renderParamComment(meta: ParamMeta, level: number): string[] {
+  const text = `${meta.label} — ${meta.help}`;
+  return wrapCommentLines(text, level);
+}
+
+// ---------------------------------------------------------------------------
+// Tree rendering
+// ---------------------------------------------------------------------------
 
 function renderAssignment(name: string, value: unknown, level: number): string {
   const prefix = INDENT.repeat(level);
   const literal = toGroovyLiteral(value, level * 4, name);
   return `${prefix}${name} = ${literal}`;
+}
+
+// Render a leaf (with its comment header) at the given indent level. The
+// `displayName` is what appears on the left of `=` — may be a dotted form
+// when a single-child branch has been collapsed into the parent.
+function renderLeafLines(
+  metaPath: string,
+  displayName: string,
+  value: unknown,
+  level: number,
+): string[] {
+  const meta = paramMetadataByPath[metaPath];
+  const comment = meta ? renderParamComment(meta, level) : [];
+  return [...comment, renderAssignment(displayName, value, level)];
+}
+
+function renderNodes(nodes: readonly TreeNode[], level: number): string[] {
+  const ordered = [...nodes].sort((a, b) => a.order - b.order);
+  const out: string[] = [];
+  for (let i = 0; i < ordered.length; i++) {
+    if (i > 0) out.push('');
+    out.push(...renderNode(ordered[i]!, level));
+  }
+  return out;
+}
+
+function renderNode(node: TreeNode, level: number): string[] {
+  if (node.kind === 'leaf') {
+    const tail = node.path.split('.').pop()!;
+    return renderLeafLines(node.path, tail, node.value, level);
+  }
+  return renderBranch(node, level);
 }
 
 function renderBranch(
@@ -194,46 +257,30 @@ function renderBranch(
   if (children.length === 1) {
     const child = children[0]!;
     if (child.kind === 'leaf') {
-      // Dotted form: e.g. `pdc.study_id = 'X'`.
-      const dottedName = `${branch.name}.${child.path.split('.').pop()!}`;
-      return [renderAssignment(dottedName, child.value, level)];
+      const dotted = `${branch.name}.${child.path.split('.').pop()!}`;
+      return renderLeafLines(child.path, dotted, child.value, level);
     }
-    // Single nested branch — recurse, prepending this segment to the
-    // produced lines' first identifier. We achieve this by rendering
-    // the sub-branch then prepending `branch.name.` to the leading
-    // identifier of each emitted line. Simpler: recurse with a wrapped
-    // name.
-    const childBranch = child;
-    const inner = renderBranch(childBranch, level);
+    const inner = renderBranch(child, level);
     return inner.map((line) => prependNamespace(line, branch.name, level));
   }
-  // Multi-child: emit a block. Inside a block, strict paramMetadata
-  // order (no scalars-first hoisting).
   const prefix = INDENT.repeat(level);
-  const inner = renderNodes(children, level + 1, false);
-  const out: string[] = [];
-  out.push(`${prefix}${branch.name} {`);
-  out.push(...inner);
-  out.push(`${prefix}}`);
-  return out;
+  const inner = renderNodes(children, level + 1);
+  return [`${prefix}${branch.name} {`, ...inner, `${prefix}}`];
 }
 
 /**
- * Prepend `name.` to the identifier at the start of a rendered dotted
- * assignment or block-opening line. Used to flatten single-child nested
- * branches into dotted form (e.g. `encyclopedia.quant.params = ...` or
- * `encyclopedia.quant { ... }`).
+ * Prepend `name.` to the identifier at the start of an emitted line whose
+ * indentation matches `level`. Used to flatten single-child nested branches
+ * into dotted form (e.g. `encyclopedia.quant.params = ...`).
  *
- * Only the first line at exactly `level` indentation gets the prefix;
- * deeper lines (block bodies) and the closing `}` are left untouched.
+ * Lines starting with `//`, lines that are deeper (extra leading spaces),
+ * empty lines, and block-closing `}` lines are left alone.
  */
 function prependNamespace(line: string, name: string, level: number): string {
   const prefix = INDENT.repeat(level);
-  // Match exactly `prefix` followed by a non-space character — i.e. the
-  // line is at this level's depth, not deeper.
   if (!line.startsWith(prefix)) return line;
   const next = line.charAt(prefix.length);
-  if (next === ' ' || next === '' || next === '}') return line;
+  if (next === '' || next === ' ' || next === '}' || next === '/') return line;
   const rest = line.slice(prefix.length);
   return `${prefix}${name}.${rest}`;
 }
@@ -254,15 +301,24 @@ function defaultVersion(): string {
 export function emitConfig(state: FormState, options?: EmitOptions): string {
   const version = options?.version ?? defaultVersion();
   const timestamp = options?.timestamp ?? new Date();
-
-  const entries = collectEntries(state);
-  const tree = buildNamespaceTree(entries);
-  const topNodes = freezeTree(tree);
-
   const head = header(version, timestamp);
-  if (topNodes.length === 0) {
+
+  const all = collectEntries(state);
+  const sectionGroups = groupBySection(all);
+  if (sectionGroups.length === 0) {
     return `${head}\nparams { }\n`;
   }
-  const bodyLines = renderNodes(topNodes, 1, true);
+
+  const bodyLines: string[] = [];
+  for (let i = 0; i < sectionGroups.length; i++) {
+    if (i > 0) bodyLines.push('');
+    const { section, entries } = sectionGroups[i]!;
+    const tree = buildNamespaceTree(entries);
+    const topNodes = freezeTree(tree);
+    bodyLines.push(...renderSectionBanner(section, 1));
+    bodyLines.push('');
+    bodyLines.push(...renderNodes(topNodes, 1));
+  }
+
   return `${head}\nparams {\n${bodyLines.join('\n')}\n}\n`;
 }
