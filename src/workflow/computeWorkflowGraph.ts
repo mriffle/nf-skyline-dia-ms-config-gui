@@ -623,7 +623,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
       id: 'output.carafe-library',
       kind: 'output-file',
       label: 'Generated library',
-      sublabel: '.dlib',
+      sublabel: '.tsv',
       status: 'active',
       stage: 4,
     });
