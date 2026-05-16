@@ -9,6 +9,7 @@ import { SectionNav } from './SectionNav';
 import { FormPane } from './FormPane';
 import { PreviewPane } from '../preview/PreviewPane';
 import { WorkflowGraphPane } from '../workflow/WorkflowGraphPane';
+import { UploadControl } from '../upload/UploadControl';
 
 declare const __APP_VERSION__: string;
 
@@ -57,6 +58,7 @@ export function AppShell() {
             >
               {showPreview ? 'Hide preview' : 'Show preview'}
             </button>
+            <UploadControl />
             <button
               type="button"
               onClick={onReset}

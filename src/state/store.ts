@@ -18,6 +18,11 @@ export interface StoreActions {
   setShowAdvanced: (show: boolean) => void;
   setActiveSection: (id: SectionId | null) => void;
   reset: () => void;
+  // Replace form state with the result of an upload. Bypasses setMode's
+  // mode-change clearing because the loaded state is already coherent
+  // for its target mode. Layers loaded values on top of createDefaultState
+  // seeds so paths the file doesn't mention still read as defaults.
+  loadFromConfig: (loaded: FormState) => void;
 }
 
 export type Store = StoreState & StoreActions;
@@ -97,6 +102,19 @@ export const useStore = create<Store>()(
       setActiveSection: (id) => set({ activeSection: id }),
 
       reset: () => set(createDefaultState()),
+
+      loadFromConfig: (loaded) => {
+        const baseline = createDefaultState();
+        set({
+          mode: loaded.mode,
+          values: { ...baseline.values, ...loaded.values },
+          touched: loaded.touched,
+          // Reset transient navigation so the form scrolls to the top.
+          // showAdvanced is intentionally preserved — it's a UI density
+          // preference, not config state.
+          activeSection: null,
+        });
+      },
     }),
     {
       name: STORAGE_KEY,

@@ -76,6 +76,12 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── format.ts                   header + indentation helpers
     │   ├── emitConfig.ts               pure: state → string
     │   └── __tests__/golden/*.config   golden output files (checked in)
+    ├── parse/                          inverse of emit — see Architecture §9
+    │   ├── types.ts                    ParsedValue, ParsedEntry, ParseResult
+    │   ├── groovyLexer.ts              tokenize the Groovy subset we accept
+    │   ├── groovyParser.ts             AST: blocks + assignments
+    │   ├── parseConfig.ts              find params { } + flatten to entries
+    │   └── mapToState.ts               entries → FormState + UploadReport
     ├── components/
     │   ├── layout/                     AppShell (hosts Preview/Workflow tabs), SectionNav, FormPane
     │   ├── form/                       Section, Field, FieldShell, HelpPopover,
@@ -83,6 +89,7 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── widgets/                    10 widgets — see "Widget catalog" below
     │   ├── preview/                    PreviewPane, GroovyHighlighter, PreviewActions
     │   ├── workflow/                   WorkflowGraphPane, WorkflowGraphSvg (live DAG render)
+    │   ├── upload/                     UploadControl, UploadDialog, UploadErrorDialog
     │   └── ModeToggle.tsx              top-of-form General/PDC mode selector
     ├── workflow/
     │   ├── types.ts                    GraphNode/GraphEdge/WorkflowGraph types
@@ -424,6 +431,132 @@ Each widget is a memoized React component receiving `WidgetProps`:
 Virtual widgets have `virtual: true` and list real schema paths in `affects`
 so the coverage test sees them as accounted for.
 
+### 9. Config upload (parse → state restoration)
+
+The inverse of the emit pipeline. The "Load config…" button in the header
+lets users upload an existing `pipeline.config` and have its values
+restored into the form. All parsing happens in the browser; nothing is
+sent anywhere.
+
+**Pipeline:**
+
+```
+text → parseConfig (lex + parse + locate params { } + flatten)
+     → mapToState (classify + coerce + infer mode/carafe)
+     → loadFromConfig (atomic store replace)
+```
+
+**Modules** (`src/parse/`):
+- `groovyLexer.ts` — tokenizer for the Groovy subset we accept (single,
+  double, and triple-quoted strings with `\\ \' \" \n \r \t \b \f \0`
+  escapes; integers, decimals, scientific notation, `_` digit
+  separators, type suffixes `L G F D I`; `// /* */` comments).
+  Rejects GString interpolation (`${...}`) — there's no way to
+  evaluate it statically.
+- `groovyParser.ts` — recursive-descent parser into a small AST of
+  `block` and `assignment` nodes. Error recovery: every parse failure
+  pushes a `ParseError` and resyncs at the next IDENT / RBRACE / EOF.
+  Distinguishes list literals (`[1,2,3]`) from map literals
+  (`['k':'v']`) by lookahead on `KEY ':' `.
+- `parseConfig.ts` — orchestrator. Locates the first `params { }` block
+  via two-pass search (prefer top-level over nested wrappers like
+  `profiles { standard { params { } } }`). Supports the
+  `params.pdc { ... }` shorthand (segments after `params` become a
+  prefix). Flattens block + dotted forms into a single `(path, value)`
+  entry list. Deduplicates with last-wins; tracks ignored outer blocks
+  (`process { }`, top-level assignments) for the report.
+- `mapToState.ts` — entries → `FormState` + `UploadReport`. The most
+  judgment-heavy module; see decisions below.
+
+**Path classification** (in `mapToState.classify`):
+1. `IGNORED_PARAM_PATHS` membership → `ignored-param`.
+2. Schema entry has `hidden: true` → `hidden-param`.
+3. Not in `schemaDerived` (and not a recognized UI virtual) →
+   `unknown-param`.
+4. Has both schema + paramMetadata → coerce normally.
+
+**Recognized UI virtuals** (`use_carafe`, `carafe.source`) are pulled
+out of the entry stream up front so they're not flagged as unknown —
+they feed the carafe inference instead. Other virtual paths in
+`paramMetadata` (e.g. `quant_spectra_files`) shouldn't appear in real
+files; if they do, they're flagged as unknown.
+
+**Value coercion** is shape-driven against `schemaDerived[path].shape`:
+- `boolean`, `integer`, `number`, `string`, `enum`: strict; mismatches
+  drop the value with a `type-mismatch` / `enum-mismatch` issue.
+- `null` is accepted for any nullable shape (the schema default for
+  many fields is null; `search_engine = null` is "no-search mode").
+- Range bounds are non-fatal: keep the value, record `range-violation`.
+- `string-or-list` coerces based on the matching widget kind:
+  - `string-list` widget + scalar string in file → wrap in 1-element
+    array (`string-coerced-to-list`).
+  - non-`string-list` widget + array in file → keep the first element
+    (`list-truncated-to-string` if length > 1).
+- `quant_spectra_dir` is special — the inverse of the emitter's
+  `normalizeQuantSpectraDir`. String → `{kind:'single'}`, array →
+  `{kind:'list'}`, object → `{kind:'batch-map'}`.
+
+**Mode inference**: `pdc.study_id` present → `'pdc'`, else `'general'`.
+If both PDC and general inputs are present, PDC wins and a
+`mode-ambiguity` issue is reported. Other `pdc.*` keys without
+`pdc.study_id` do NOT flip the mode (they could be inert leftovers).
+
+**`use_carafe` inference**:
+- Explicit `use_carafe = true|false` in the file is authoritative.
+- Otherwise: any `carafe.*` path present → `true`.
+
+**`carafe.source` inference**: if not explicit in the file, inferred
+from which carafe input field is set (`carafe.spectra_file` →
+`'file'`, `carafe.spectra_dir` → `'dir'`,  `carafe.pdc_files` →
+`'pdc-files'`, `carafe.pdc_n_files` → `'pdc-sample'`). A mismatch
+between explicit `carafe.source` and the inferred value is reported as
+`carafe-source-mismatch`; the explicit value still wins in state.
+
+**Touched semantics**: every successfully loaded path becomes
+`touched: true`. The user committed to the value by writing it in the
+file. This includes `alwaysEmit`-eligible paths if they appear.
+
+**`UploadReport` issue kinds**:
+- *Discarded* (red in the dialog): `unknown-param`, `hidden-param`,
+  `ignored-param`, `type-mismatch`, `enum-mismatch`.
+- *Loaded with notes* (amber): `range-violation`,
+  `string-coerced-to-list`, `list-truncated-to-string`,
+  `mode-ambiguity`, `carafe-source-mismatch`.
+- Plus parse-time `duplicates` and `ignoredOuterBlocks` rendered
+  separately.
+
+**Store integration**: a `loadFromConfig(loaded)` action atomically
+replaces `mode`, `values`, `touched`. Loaded values are layered ON TOP
+of `createDefaultState()` seeds so paths the file doesn't mention
+(e.g. `qc_report.skip` if absent) still read sensible defaults.
+Bypasses `setMode`'s clearing logic — the loaded state is already
+mode-coherent for the target mode. Resets `activeSection`; preserves
+`showAdvanced` (UI density preference).
+
+**UI** (`src/components/upload/`):
+- `UploadControl.tsx` — header button next to Reset, hidden file
+  input, lifecycle state. Uses `FileReader` rather than
+  `File.text()` for jsdom compat.
+- `UploadDialog.tsx` — preview modal: summary, replace warning when
+  current touched, collapsible discarded + advisory issue groups,
+  Cancel / Load. Escape cancels.
+- `UploadErrorDialog.tsx` — shown when no `params { }` block was
+  found or the parse couldn't produce any entries.
+
+**Round-trip stability** — two properties verified by
+`src/parse/__tests__/roundtrip.test.ts`:
+1. **Idempotency** for every emit golden: parse → emit → parse → emit
+   produces the same bytes as the first emit. This is the user-facing
+   property — a load + re-download converges after one cycle.
+2. **Byte-stable** parse → emit reproduces the original golden — but
+   only for goldens whose source state contained every
+   `alwaysEmit`-eligible field for the chosen engine
+   (`general-cascadia.config`, `general-diann-minimal.config`,
+   `general-encyclopedia-narrow-wide.config`, `general-no-search.config`,
+   `pdc-diann-simple.config`). The other goldens were constructed with
+   stripped emit-test states; see "Hard rules" gotcha on engine-predicate
+   asymmetry below.
+
 ## Hard rules / invariants
 
 1. **Emit only touched paths.** Never auto-write defaults into state.
@@ -500,6 +633,13 @@ clean name. Don't try to "fix" this locally — the trim handles it.
 3. Add a dispatch case in `Field.tsx`.
 4. Add to the `Widget` table in this CLAUDE.md.
 
+### New `UploadIssue` kind
+1. Add the variant to the `UploadIssue` union in `src/parse/mapToState.ts`.
+2. Decide whether it's a discard or advisory issue and update
+   `isDiscardIssue` in `src/components/upload/UploadDialog.tsx`.
+3. Add a `formatIssue` case there too — what the user sees in the dialog.
+4. Add a firing test in `src/parse/__tests__/mapToState.test.ts`.
+
 ### Schema default disagrees with workflow's runtime default
 If `npm run update-schema` pulls in a default that doesn't match the value
 the workflow actually uses (check the workflow's `nextflow.config`), don't
@@ -566,6 +706,22 @@ When you add an `alwaysEmit` field:
   `defaultOverride` on the matching `ParamMeta` entry. If `update-schema`
   ever pulls in a fixed upstream default, the override becomes redundant
   but harmless — feel free to remove it. There's no automated detector.
+- **Engine-predicate `alwaysEmit` asymmetry**: `diann.search_params`,
+  `diann.fasta_digest_params`, `encyclopedia.{quant,chromatogram}.params`,
+  `cascadia.use_gpu`, `cascadia.score_threshold` use a
+  `searchEngineIs(...)` predicate for `alwaysEmit`. The predicate
+  inspects `state.values['search_engine']` — if `search_engine` is NOT
+  in `state.values` (only present via the unconditional `alwaysEmit:
+  true + defaultOverride` path), the predicate returns false and those
+  engine-specific defaults are NOT emitted. After upload, the loader
+  always puts `search_engine` in `state.values`, so re-emit produces a
+  more verbose config than some emit-test fixtures predicted. This is
+  why `roundtrip.test.ts` uses idempotency for the goldens whose source
+  state was stripped, and byte-equality only for the realistic ones.
+- **Upload uses `FileReader`, not `File.text()`** in
+  `UploadControl.tsx`. The `.text()` method isn't reliably available
+  in jsdom across vitest versions; `FileReader` is universally
+  supported.
 - **Carafe enabled-by-default** means the form is invalid on first load
   until the user picks a Carafe input source (or turns Carafe off). This
   is intentional — Carafe is the recommended library path. Existing tests
@@ -597,10 +753,15 @@ When you add an `alwaysEmit` field:
 | Trickiest widgets (BatchMap, ModeToggle, GlobRegexPair, SpectraSourceRadio) | YES | Hand-tested interactions |
 | `computeWorkflowGraph` scenarios     | YES     | Each conditional gate has a test     |
 | Full form snapshots                  | NO      | High churn, low signal               |
-| Zustand store internals              | LIGHT   | Smoke + mode-switch behavior         |
+| Zustand store internals              | LIGHT   | Smoke + mode-switch + loadFromConfig |
+| Groovy lexer / parser / parseConfig  | YES     | Every shape the emitter produces     |
+| `mapToState` issue categorization    | YES     | One firing test per UploadIssue kind |
+| Round-trip (parse → emit) idempotency| YES     | Per emit golden                      |
+| Round-trip byte-stable               | PARTIAL | Realistic-state goldens only — see §9 |
+| Upload UI flow (UploadControl)       | YES     | Button → preview → load → store      |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **282 tests across 17 files**. Run `npm test` before pushing.
+Current count: **413 tests across 23 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
