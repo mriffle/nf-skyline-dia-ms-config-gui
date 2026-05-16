@@ -145,6 +145,93 @@ describe('mode switch clears the now-invisible branch', () => {
   });
 });
 
+describe('loadFromConfig (upload)', () => {
+  it('replaces form state and marks loaded paths touched', () => {
+    const { setValue, loadFromConfig } = useStore.getState();
+    setValue('fasta', '/old.fasta');
+    setValue('email', 'old@example.com');
+
+    loadFromConfig({
+      mode: 'general',
+      values: {
+        fasta: '/new.fasta',
+        quant_spectra_dir: { kind: 'single', path: '/data' },
+      },
+      touched: { fasta: true, quant_spectra_dir: true },
+    });
+
+    const s = useStore.getState();
+    expect(s.values['fasta']).toBe('/new.fasta');
+    expect(s.values['quant_spectra_dir']).toEqual({ kind: 'single', path: '/data' });
+    // The previously-touched email is gone — replace, not merge.
+    expect(s.values['email']).toBeUndefined();
+    expect(s.touched).toEqual({ fasta: true, quant_spectra_dir: true });
+  });
+
+  it('preserves the createDefaultState seeds when the file does not mention them', () => {
+    const { loadFromConfig } = useStore.getState();
+    loadFromConfig({
+      mode: 'general',
+      values: { fasta: '/db.fasta' },
+      touched: { fasta: true },
+    });
+    const s = useStore.getState();
+    // Seeds remain available so the form reads sensible defaults.
+    expect(s.values['use_carafe']).toBe(true);
+    expect(s.values['search_engine']).toBe('diann');
+    expect(s.values['qc_report.skip']).toBe(false);
+    expect(s.values['skyline.group_proteins']).toBe(true);
+    // Seeds are not marked touched — only the loaded path is.
+    expect(s.touched).toEqual({ fasta: true });
+  });
+
+  it('loaded values override seeds where they overlap', () => {
+    const { loadFromConfig } = useStore.getState();
+    loadFromConfig({
+      mode: 'general',
+      values: {
+        search_engine: 'encyclopedia',
+        use_carafe: false,
+      },
+      touched: { search_engine: true, use_carafe: true },
+    });
+    const s = useStore.getState();
+    expect(s.values['search_engine']).toBe('encyclopedia');
+    expect(s.values['use_carafe']).toBe(false);
+  });
+
+  it('switches mode without firing setMode\'s clearing logic', () => {
+    const { loadFromConfig } = useStore.getState();
+    // A loaded PDC config shouldn't trigger general-mode clearing of
+    // its own pdc.* values.
+    loadFromConfig({
+      mode: 'pdc',
+      values: { 'pdc.study_id': 'PDC1', 'pdc.n_raw_files': 5 },
+      touched: { 'pdc.study_id': true, 'pdc.n_raw_files': true },
+    });
+    const s = useStore.getState();
+    expect(s.mode).toBe('pdc');
+    expect(s.values['pdc.study_id']).toBe('PDC1');
+    expect(s.values['pdc.n_raw_files']).toBe(5);
+  });
+
+  it('resets activeSection but preserves showAdvanced', () => {
+    const { setActiveSection, setShowAdvanced, loadFromConfig } = useStore.getState();
+    setActiveSection('search');
+    setShowAdvanced(true);
+
+    loadFromConfig({
+      mode: 'general',
+      values: { fasta: '/x.fasta' },
+      touched: { fasta: true },
+    });
+
+    const s = useStore.getState();
+    expect(s.activeSection).toBe(null);
+    expect(s.showAdvanced).toBe(true);
+  });
+});
+
 describe('localStorage persistence', () => {
   it('persists state to localStorage on changes', async () => {
     useStore.getState().setValue('fasta', '/persisted.fasta');
