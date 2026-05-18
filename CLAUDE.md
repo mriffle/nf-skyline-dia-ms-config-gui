@@ -81,6 +81,7 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── groovyLexer.ts              tokenize the Groovy subset we accept
     │   ├── groovyParser.ts             AST: blocks + assignments
     │   ├── parseConfig.ts              find params { } + flatten to entries
+    │   ├── wellFormedness.ts           pre-flight syntax gate — see §9 sub
     │   └── mapToState.ts               entries → FormState + UploadReport
     ├── components/
     │   ├── layout/                     AppShell (hosts Preview/Workflow tabs + Wizard overlay),
@@ -485,10 +486,20 @@ sent anywhere.
 **Pipeline:**
 
 ```
-text → parseConfig (lex + parse + locate params { } + flatten)
+text → checkWellFormedness (HARD GATE — rejects on any syntax error)
+     → parseConfig (lex + parse + locate params { } + flatten)
      → mapToState (classify + coerce + infer mode/carafe)
      → loadFromConfig (atomic store replace)
 ```
+
+The well-formedness check is a pre-flight gate run by `UploadControl`
+**before** `parseConfig`. If it reports any issue the upload is rejected
+outright — no partial state load. This exists because the lexer and
+parser both recover from typos (the lexer emits a STRING token for
+`'unterm` plus an error; the parser skips stray tokens via `recover()`
+to the next IDENT/RBRACE/EOF). Without the gate, a file with a single
+syntax error would silently load only the salvageable entries, leaving
+the user with a half-loaded form and no signal that anything was lost.
 
 **Modules** (`src/parse/`):
 - `groovyLexer.ts` — tokenizer for the Groovy subset we accept (single,
@@ -507,6 +518,43 @@ text → parseConfig (lex + parse + locate params { } + flatten)
   error loudly. To add a new directive, append its bare identifier to
   that set; the parser will then capture it with start/end offsets
   identical to a block.
+- `wellFormedness.ts` — `checkWellFormedness(source) → { isWellFormed,
+  issues }`. Internally runs `lex` + a brace/bracket balance pass +
+  `parseTokens`, aggregates and dedupes the errors, and decorates each
+  with a pre-built source-line snippet (line + caret indicator) for
+  rendering in `<pre>`. **Deliberately app-agnostic** — depends only on
+  the other parse-stack modules and `types.ts`, so it's reusable from
+  any other GUI built on the same Groovy subset.
+
+  Strictness is split into two tiers:
+    * **File-wide** (enforced everywhere, including outer blocks):
+      unterminated strings, unterminated `/* */` comments, and
+      brace/bracket balance. These break the lexer's ability to find
+      subsequent tokens (or, for balance, our ability to locate block
+      boundaries) — any of them anywhere in the file is fatal.
+    * **Scoped to `params { }`** (NOT enforced in outer blocks like
+      `process { }`, `profiles { }`): GString interpolation,
+      unexpected characters, invalid number literals, and every parse
+      error (missing `=`, expected-value with wrong token, unclosed
+      lists/maps, etc.).
+
+  The scoping matters because outer blocks round-trip verbatim via
+  `parseConfig.collectOuterScope` — their contents may use the full
+  Groovy / Nextflow grammar (Nextflow selectors `withName:NAME { … }`
+  / `withLabel:LABEL { … }`, dotted reference values like
+  `params.max_cpus`, GString interpolation `"${params.outdir}/x"`,
+  closures, operators, semicolons). We don't model any of that, so we
+  don't get to call it "malformed". The scope is computed by walking
+  the parsed AST for a `params` block (two-pass top-level-first, same
+  strategy as `parseConfig.findParamsBlock`) and using its line range
+  to filter scoped issues. If no params block is found, scoped issues
+  are dropped entirely — downstream `parseConfig` will produce its own
+  "no params { } block found" diagnostic. To re-use the module for a
+  different config grammar, change the `SCOPED_BLOCK_NAME` constant
+  inside the module.
+
+  Balance pass does NOT pop on mismatch so one stray closer doesn't
+  cascade into two errors.
 - `parseConfig.ts` — orchestrator. Locates the first `params { }` block
   via two-pass search (prefer top-level over nested wrappers like
   `profiles { standard { params { } } }`). Supports the
@@ -653,14 +701,28 @@ doesn't carry the field.
 **UI** (`src/components/upload/`):
 - `UploadControl.tsx` — header button next to Reset, hidden file
   input, lifecycle state. Uses `FileReader` rather than
-  `File.text()` for jsdom compat. Passes
+  `File.text()` for jsdom compat. Runs `checkWellFormedness` first
+  and short-circuits to `UploadErrorDialog` (syntax-errors variant)
+  on failure. Otherwise calls `parseConfig`, then passes
   `parsed.preservedOuterBlocks` into `mapToState` as the second arg.
 - `UploadDialog.tsx` — preview modal: summary, replace warning when
   current touched, collapsible discarded (red) + advisory (amber) +
   preserved (sky-blue, info tone) issue groups, Cancel / Load.
   Escape cancels.
-- `UploadErrorDialog.tsx` — shown when no `params { }` block was
-  found or the parse couldn't produce any entries.
+- `UploadErrorDialog.tsx` — two variants discriminated by
+  `variant.kind`. `'syntax-errors'` renders the per-issue list with
+  source snippets (4-char gutter + caret indicator) for files that
+  failed the well-formedness gate. `'no-params-block'` is the
+  pre-existing variant for files that parsed cleanly but had no
+  `params { }` content. Same chrome (title, Close, Escape) either way.
+  The syntax-errors variant ALSO renders an "Import" secondary button
+  (with warning copy explaining the risk) when `onProceedAnyway` is
+  provided — letting the user override a false-positive in our checker. The
+  bypass is intentionally NOT offered on the no-params-block variant
+  (there's nothing to import). UploadControl stashes the file text on
+  the error state so the bypass can resume the post-gate pipeline
+  (`parseConfig` → `mapToState` → preview dialog) without re-reading
+  the file.
 - `src/components/form/PreservedBlocksNotice.tsx` — informational
   banner shown in the form pane (between `ValidationSummary` and the
   section list). Renders when `state.preservedOuterText` is non-empty
@@ -807,6 +869,18 @@ selected (because predict is the absence of the other two flags).
    tens of KB warrants justification.
 9. **Schema lives at the repo root** (`./nextflow_schema.json`), not at
    `../nextflow_schema.json` — this repo is standalone, not a subfolder.
+10. **Upload runs the well-formedness gate first.** `UploadControl` must
+    call `checkWellFormedness` BEFORE `parseConfig`/`mapToState` and
+    short-circuit on any issue. Don't be tempted to "just use the parser's
+    errors" — the lexer and parser both intentionally recover from typos
+    so they can still report multiple problems in one pass; that recovery
+    drops content silently and is unacceptable as a load gate. The gate
+    is overridable by the user via the "Import" button on the
+    syntax-errors dialog (in case the checker has a false positive on
+    valid syntax), but the default path always rejects. The
+    well-formedness module is also app-agnostic (zero project-specific
+    imports) so it can be lifted into other config GUIs as-is — keep it
+    that way.
 
 ## Schema sync workflow
 
@@ -1010,12 +1084,15 @@ When you add an `alwaysEmit` field:
 | Zustand store internals              | LIGHT   | Smoke + mode-switch + loadFromConfig |
 | Groovy lexer / parser / parseConfig  | YES     | Every shape the emitter produces     |
 | `mapToState` issue categorization    | YES     | One firing test per UploadIssue kind |
+| `checkWellFormedness` (each malformed shape) | YES | Pre-flight gate must not let real syntax errors through |
+| `checkWellFormedness` (emit goldens) | YES     | Regression guard: emitter output must always be well-formed |
+| `checkWellFormedness` outer-block tolerance | YES | Nextflow process selectors, dotted refs, GString in outer blocks must NOT fail the gate |
 | Round-trip (parse → emit) idempotency| YES     | Per emit golden                      |
 | Round-trip byte-stable               | PARTIAL | Realistic-state goldens only — see §9 |
-| Upload UI flow (UploadControl)       | YES     | Button → preview → load → store      |
+| Upload UI flow (UploadControl)       | YES     | Button → preview → load → store; both error variants |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **413 tests across 23 files**. Run `npm test` before pushing.
+Current count: **494 tests across 24 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
