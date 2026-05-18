@@ -41,6 +41,28 @@ interface PendingError {
   readonly hadParamsBlock: boolean;
 }
 
+function LoadIcon() {
+  // Document with up-arrow — load a file from disk into the app.
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 2.75h6.25L15 6.5v10.75a.75.75 0 0 1-.75.75H5.75a.75.75 0 0 1-.75-.75V3.5a.75.75 0 0 1 .75-.75Z" />
+      <path d="M11 2.75V6.5H15" />
+      <path d="M10 14.25V9" />
+      <path d="M7.75 11.25 10 9l2.25 2.25" />
+    </svg>
+  );
+}
+
 export function UploadControl() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PendingPreview | null>(null);
@@ -136,10 +158,11 @@ export function UploadControl() {
         type="button"
         onClick={triggerPicker}
         className={[
-          'rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700',
+          'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700',
           'hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-accent-500',
         ].join(' ')}
       >
+        <LoadIcon />
         Load config…
       </button>
 

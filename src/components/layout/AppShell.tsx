@@ -65,11 +65,12 @@ export function AppShell() {
               onClick={() => setWizardOpen(true)}
               disabled={wizardOpen}
               className={[
-                'rounded-md border border-accent-500 bg-accent-500 px-3 py-1.5 text-sm font-medium text-white',
+                'inline-flex items-center gap-1.5 rounded-md border border-accent-500 bg-accent-500 px-3 py-1.5 text-sm font-medium text-white',
                 'hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-accent-500',
                 wizardOpen ? 'cursor-not-allowed opacity-60' : '',
               ].join(' ')}
             >
+              <WizardIcon />
               Start wizard…
             </button>
             <UploadControl />
@@ -77,10 +78,11 @@ export function AppShell() {
               type="button"
               onClick={onReset}
               className={[
-                'rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700',
+                'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700',
                 'hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-accent-500',
               ].join(' ')}
             >
+              <ResetIcon />
               Reset
             </button>
           </div>
@@ -155,6 +157,46 @@ interface TabButtonProps {
   readonly onClick: () => void;
   readonly controls: string;
   readonly children: React.ReactNode;
+}
+
+function WizardIcon() {
+  // Sparkles — evokes a "magic" guided experience.
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 2.5 9.2 6 12.5 7 9.2 8 8 11.5 6.8 8 3.5 7 6.8 6 8 2.5Z" />
+      <path d="M14.5 11 15.2 13.1 17.3 13.8 15.2 14.5 14.5 16.6 13.8 14.5 11.7 13.8 13.8 13.1 14.5 11Z" />
+    </svg>
+  );
+}
+
+function ResetIcon() {
+  // Circular arrow — undo / refresh.
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3.5 10a6.5 6.5 0 1 0 1.9-4.6" />
+      <path d="M3 3v3.5h3.5" />
+    </svg>
+  );
 }
 
 function TabButton({ isActive, onClick, controls, children }: TabButtonProps) {
