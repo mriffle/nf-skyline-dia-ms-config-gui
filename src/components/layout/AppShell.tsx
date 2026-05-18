@@ -10,6 +10,7 @@ import { FormPane } from './FormPane';
 import { PreviewPane } from '../preview/PreviewPane';
 import { WorkflowGraphPane } from '../workflow/WorkflowGraphPane';
 import { UploadControl } from '../upload/UploadControl';
+import { Wizard } from '../wizard/Wizard';
 
 declare const __APP_VERSION__: string;
 
@@ -19,6 +20,7 @@ export function AppShell() {
   const reset = useStore((s) => s.reset);
   const [showPreview, setShowPreview] = useState(false);
   const [activeTab, setActiveTab] = useState<RightTab>('preview');
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const onReset = (): void => {
     const ok = window.confirm(
@@ -58,6 +60,18 @@ export function AppShell() {
             >
               {showPreview ? 'Hide preview' : 'Show preview'}
             </button>
+            <button
+              type="button"
+              onClick={() => setWizardOpen(true)}
+              disabled={wizardOpen}
+              className={[
+                'rounded-md border border-accent-500 bg-accent-500 px-3 py-1.5 text-sm font-medium text-white',
+                'hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-accent-500',
+                wizardOpen ? 'cursor-not-allowed opacity-60' : '',
+              ].join(' ')}
+            >
+              Start wizard…
+            </button>
             <UploadControl />
             <button
               type="button"
@@ -74,53 +88,57 @@ export function AppShell() {
       </header>
 
       <main className="mx-auto w-full max-w-screen-2xl flex-1 px-4 py-8 sm:px-6">
-        <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
-          <div className="w-full lg:w-56 lg:shrink-0">
-            <SectionNav />
-          </div>
-          <div className="flex-1 min-w-0 lg:max-w-[31rem]">
-            <FormPane />
-          </div>
-          <div
-            className={[
-              'w-full lg:sticky lg:top-6 lg:min-w-[28rem] lg:flex-1',
-              showPreview ? 'block' : 'hidden lg:block',
-            ].join(' ')}
-          >
-            <div className="flex flex-col gap-2">
-              <div role="tablist" aria-label="Right pane" className="flex items-center gap-1">
-                <TabButton
-                  isActive={activeTab === 'preview'}
-                  onClick={() => setActiveTab('preview')}
-                  controls="right-pane-preview"
+        {wizardOpen ? (
+          <Wizard onExit={() => setWizardOpen(false)} />
+        ) : (
+          <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
+            <div className="w-full lg:w-56 lg:shrink-0">
+              <SectionNav />
+            </div>
+            <div className="flex-1 min-w-0 lg:max-w-[31rem]">
+              <FormPane />
+            </div>
+            <div
+              className={[
+                'w-full lg:sticky lg:top-6 lg:min-w-[28rem] lg:flex-1',
+                showPreview ? 'block' : 'hidden lg:block',
+              ].join(' ')}
+            >
+              <div className="flex flex-col gap-2">
+                <div role="tablist" aria-label="Right pane" className="flex items-center gap-1">
+                  <TabButton
+                    isActive={activeTab === 'preview'}
+                    onClick={() => setActiveTab('preview')}
+                    controls="right-pane-preview"
+                  >
+                    Config preview
+                  </TabButton>
+                  <TabButton
+                    isActive={activeTab === 'graph'}
+                    onClick={() => setActiveTab('graph')}
+                    controls="right-pane-graph"
+                  >
+                    Workflow graph
+                  </TabButton>
+                </div>
+                <div
+                  id="right-pane-preview"
+                  role="tabpanel"
+                  hidden={activeTab !== 'preview'}
                 >
-                  Config preview
-                </TabButton>
-                <TabButton
-                  isActive={activeTab === 'graph'}
-                  onClick={() => setActiveTab('graph')}
-                  controls="right-pane-graph"
+                  {activeTab === 'preview' ? <PreviewPane /> : null}
+                </div>
+                <div
+                  id="right-pane-graph"
+                  role="tabpanel"
+                  hidden={activeTab !== 'graph'}
                 >
-                  Workflow graph
-                </TabButton>
-              </div>
-              <div
-                id="right-pane-preview"
-                role="tabpanel"
-                hidden={activeTab !== 'preview'}
-              >
-                {activeTab === 'preview' ? <PreviewPane /> : null}
-              </div>
-              <div
-                id="right-pane-graph"
-                role="tabpanel"
-                hidden={activeTab !== 'graph'}
-              >
-                {activeTab === 'graph' ? <WorkflowGraphPane /> : null}
+                  {activeTab === 'graph' ? <WorkflowGraphPane /> : null}
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </main>
 
       <footer className="border-t border-slate-200 bg-white">

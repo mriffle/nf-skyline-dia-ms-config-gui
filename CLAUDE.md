@@ -83,13 +83,16 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── parseConfig.ts              find params { } + flatten to entries
     │   └── mapToState.ts               entries → FormState + UploadReport
     ├── components/
-    │   ├── layout/                     AppShell (hosts Preview/Workflow tabs), SectionNav, FormPane
+    │   ├── layout/                     AppShell (hosts Preview/Workflow tabs + Wizard overlay),
+    │   │                               SectionNav, FormPane
     │   ├── form/                       Section, Field, FieldShell, HelpPopover,
     │   │                               AdvancedToggle, ValidationSummary
     │   ├── widgets/                    10 widgets — see "Widget catalog" below
     │   ├── preview/                    PreviewPane, GroovyHighlighter, PreviewActions
     │   ├── workflow/                   WorkflowGraphPane, WorkflowGraphSvg (live DAG render)
     │   ├── upload/                     UploadControl, UploadDialog, UploadErrorDialog
+    │   ├── wizard/                     Wizard, WizardChrome, WizardRadioCards,
+    │   │                               WizardAdvancedSection, flow.ts, screens/*
     │   └── ModeToggle.tsx              top-of-form General/PDC mode selector
     ├── workflow/
     │   ├── types.ts                    GraphNode/GraphEdge/WorkflowGraph types
@@ -98,7 +101,9 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     ├── hooks/                          useFieldValue, useValidation, useFormState
     └── lib/
         ├── download.ts, clipboard.ts
-        └── formatDefault.ts            renders schema defaults for hints/placeholders
+        ├── formatDefault.ts            renders schema defaults for hints/placeholders
+        └── spectraFormat.ts            shared file-extension classifier (raw / mzml / dzip)
+                                        used by both computeWorkflowGraph and the wizard
 ```
 
 `scripts/visual-check.mjs` (Playwright + chromium) seeds `localStorage` for ten
@@ -107,6 +112,12 @@ when touching the workflow graph or layout. Run `npm run dev` first, then
 `node scripts/visual-check.mjs --port 5173`. Output PNGs land in `screenshots/`
 (gitignored). `scripts/click-check.mjs` is a smaller companion that exercises
 the click-to-focus behavior on input nodes.
+
+`scripts/wizard-smoke.mjs` and `scripts/wizard-smoke-branches.mjs` walk the
+wizard end-to-end (the happy path + the PDC / Cascadia / Carafe branches)
+and dump screenshots under `screenshots/wizard*/`. Useful for verifying
+that `shouldShow` predicates and per-screen radio cards still render
+correctly after touching wizard/flow.ts or any screen file.
 
 ## Architecture — the load-bearing concepts
 
@@ -557,6 +568,104 @@ mode-coherent for the target mode. Resets `activeSection`; preserves
    stripped emit-test states; see "Hard rules" gotcha on engine-predicate
    asymmetry below.
 
+### 10. Wizard (guided form entry)
+
+An opt-in step-by-step alternative to the form. Triggered by the "Start
+wizard…" header button (next to "Load config…"). Replaces the
+form/preview layout while active; finishing drops the user back into the
+form view with state intact. Reads and writes the same Zustand store as
+the form — there is no parallel "wizard state" to keep in sync.
+
+**File layout** (all under `src/components/wizard/`):
+
+- `Wizard.tsx` — container. Owns the local `currentScreenId` and snaps
+  to a still-applicable screen if the active subset shrinks.
+- `WizardChrome.tsx` — left progress strip with clickable completed
+  steps, current title, Back / Next / Finish / Exit buttons.
+- `WizardRadioCards.tsx` — generic radio-card group for the top-level
+  branching questions (mode, engine, library strategy, etc.).
+- `WizardAdvancedSection.tsx` — per-screen "Advanced options" expander
+  with local open state (does NOT flip `store.showAdvanced`).
+- `flow.ts` — screen catalog. Each screen exports `id`, `title`,
+  `shortLabel`, `shouldShow(state)`, optional `canAdvance(state)`, and
+  `Component`. The wizard renders only screens whose `shouldShow`
+  returns true; skipped screens drop out of the progress strip too.
+- `screens/*.tsx` — one file per screen (Mode, InputData,
+  ConversionOnly, InputFormat, VendorRaw, SearchEngine, Fasta,
+  LibraryStrategy, CarafeInput, EmpiricalLibrary, Skyline,
+  ReplicateMetadata, Reports, Panorama, Execution, Review).
+
+**Branching examples** (see `flow.ts` for the full set):
+
+- The Input format screen asks `Thermo .raw` / `Bruker .d.zip` / `mzML`
+  and stores the choice in `state.values['quant_input_format']` (a
+  wizard-only key; the emitter's `groupBySection` silently drops it
+  because there's no `paramMetadata` entry). The Vendor RAW screen is
+  shown only when format=raw — `.d.zip` and `mzML` skip it entirely.
+- On General-mode entry, the Input format screen runs a one-shot
+  detection from file extensions via `dominantFormat(facts)` (from
+  `src/lib/spectraFormat.ts`) and pre-seeds the radio when
+  unambiguous. PDC mode has no paths to inspect so the user must pick.
+- PDC mode hides Replicate-metadata and Empirical-library.
+  Vendor RAW now appears in PDC too when the user declares format=raw
+  (`use_vendor_raw`'s `visibleWhen: inGeneral` was dropped from
+  paramMetadata so the toggle is mode-agnostic).
+- Cascadia hides FASTA, Library strategy, Carafe input, and Empirical
+  library entirely.
+- msconvert-only hides everything between Conversion-scope and
+  Panorama.
+
+**Demultiplex routing.** `msconvert.do_demultiplex` is a single global
+setting that applies to every stream the workflow msconverts. The
+wizard surfaces it as a prominent (non-Advanced) question on
+**exactly one** screen — the one tied to the first stream that
+triggers msconvert:
+
+- Vendor RAW screen, when "Convert RAW to mzML first" is chosen — the
+  main quant flow runs msconvert there.
+- Carafe Input screen, when format=raw AND the user picked Feed RAW
+  directly to DIA-NN. The main flow skips msconvert, but Carafe still
+  converts Thermo .raw to mzML. Encoded by `showDemultiplexHere()` in
+  `screens/CarafeInputScreen.tsx`. The amber notice explains *why* the
+  question is repositioned. For format=mzml or format=.d.zip the
+  Carafe screen never surfaces demultiplex — Carafe consumes those
+  formats without msconvert.
+
+`msconvert.do_simasspectra` and `msconvert.mz_shift_ppm` always live
+inside an Advanced expander adjacent to demultiplex.
+
+**Field reuse**: each screen renders existing widgets via `<Field
+path="...">` so the dropdowns, glob/regex pair, batch map, etc. behave
+identically to the form. Advanced-tier fields rendered inside
+`<WizardAdvancedSection>` pass `bypassTier` to `Field` so they appear
+without flipping the global `showAdvanced` toggle.
+
+**Selection state for derived choices** (library strategy, optional
+empirical library, optional replicate metadata): the wizard reads
+`state.touched[path]` rather than `isNonEmptyString(value)` to decide
+which radio is selected. This is so a user who picks "Upload my own
+library" — which seeds `spectral_library: ''` and marks it touched —
+keeps the Upload radio selected while they're mid-edit of an empty
+path. Switching radios always uses `clearValue` first, which removes
+both the value and the touched flag, so the discriminator resets
+cleanly.
+
+**`canAdvance` gating**: the Next button is disabled when the current
+screen's `canAdvance(state)` returns false. Used to enforce required
+inputs for the screen the user is on (e.g. FASTA path, PDC study ID,
+Carafe input matching the selected source). It does NOT block on
+errors elsewhere in the state — those are surfaced on the Review
+screen via the existing `ValidationSummary`.
+
+**Default state interaction**: `createDefaultState()` seeds
+`use_carafe: true`, so the Library-strategy screen lands with Carafe
+preselected on a fresh wizard. The radio shows "Predict from FASTA"
+with the "Recommended" badge so the user understands the cheaper
+option. For DIA-NN, `readStrategy` falls back to `'predict'` when
+neither Carafe nor an uploaded library is active — without this,
+clicking "Predict" would clear `use_carafe` and leave no radio
+selected (because predict is the absence of the other two flags).
+
 ## Hard rules / invariants
 
 1. **Emit only touched paths.** Never auto-write defaults into state.
@@ -674,6 +783,30 @@ When you add an `alwaysEmit` field:
 - The `Default: X` hint is auto-suppressed by `Field.tsx` for
   `alwaysEmit` fields.
 
+### New wizard screen
+1. Add a file under `src/components/wizard/screens/` exporting the
+   screen component (and a `<name>CanAdvance(state)` function if Next
+   should be gated by per-screen validation).
+2. Add the screen to the `WizardScreenId` union and the `wizardScreens`
+   array in `src/components/wizard/flow.ts`, in the desired flow order.
+   Provide `shouldShow(state)` if the screen is conditional (skipped
+   for some modes/engines/feature flags) and the optional
+   `canAdvance(state)`.
+3. Reuse existing widgets via `<Field path="…">`. Render advanced-tier
+   fields inside `<WizardAdvancedSection>` and pass `bypassTier` to
+   each so they appear without flipping `store.showAdvanced`.
+4. For top-level branching questions, use `<WizardRadioCards>` and
+   derive the selected option from `state.values` / `state.touched`
+   (don't track a separate "user clicked" state — the wizard reads
+   from the store on every render).
+5. If your screen toggles a virtual flag like `use_carafe` that has an
+   `affects` list, remember the radio's selected state must remain
+   readable from `state` alone after a click — see the
+   "Selection state for derived choices" note in Architecture §10.
+6. Run `node scripts/wizard-smoke.mjs --port 5173` and
+   `node scripts/wizard-smoke-branches.mjs --port 5173` to verify the
+   end-to-end walk and the branch-skipping logic.
+
 ## Gotchas
 
 - **`__APP_VERSION__`** is a Vite `define` injected at build time. Tests run
@@ -739,6 +872,11 @@ When you add an `alwaysEmit` field:
   `no-search-requires-library` and the emitter's null handling still
   exist (for testing and for users who hand-edit the generated config),
   but the form cannot produce `search_engine: null` through any control.
+- **`Field` accepts a `bypassTier` prop.** The form pane gates advanced
+  fields on `store.showAdvanced`; the wizard renders advanced fields
+  inside its per-screen `<WizardAdvancedSection>` with `bypassTier`
+  so the global toggle stays unaffected. Visibility predicates
+  (`visibleWhen`) are still honored.
 
 ## Testing strategy — what's worth testing and what isn't
 

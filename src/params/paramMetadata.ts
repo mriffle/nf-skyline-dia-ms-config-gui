@@ -192,7 +192,6 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'Skip msconvert and feed vendor RAW files straight to the search engine. Only supported by DIA-NN.',
     tier: 'common',
     widget: 'boolean',
-    visibleWhen: inGeneral,
   },
   {
     path: 'vendor_raw_copy',
@@ -201,7 +200,7 @@ export const paramMetadata: readonly ParamMeta[] = [
     help: 'When using vendor RAW, copy rather than hard-link them into the work directory. Required on filesystems that do not support hard links.',
     tier: 'advanced',
     widget: 'boolean',
-    visibleWhen: (s) => inGeneral(s) && s.values['use_vendor_raw'] === true,
+    visibleWhen: (s) => s.values['use_vendor_raw'] === true,
   },
   {
     path: 'files_per_quant_batch',
@@ -240,8 +239,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     path: 'pdc.n_raw_files',
     section: 'input-pdc',
     label: 'Number of RAW files',
-    help: 'Limit the download to the first N RAW files in the study. Leave unset to download the entire study.',
-    tier: 'common',
+    help: 'Limit the download to the first N RAW files in the study. Intended for testing the workflow without downloading the entire dataset; leave unset for production runs.',
+    tier: 'advanced',
     widget: 'number',
     visibleWhen: inPdc,
   },

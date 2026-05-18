@@ -24,9 +24,14 @@ import type { WidgetProps } from '../widgets/types';
 
 interface FieldProps {
   readonly path: string;
+  // When true, render advanced-tier fields regardless of the global
+  // showAdvanced toggle. The wizard sets this inside its per-screen
+  // Advanced expander so advanced fields appear without flipping the
+  // form's master toggle.
+  readonly bypassTier?: boolean;
 }
 
-export function Field({ path }: FieldProps) {
+export function Field({ path, bypassTier = false }: FieldProps) {
   const meta = paramMetadataByPath[path];
   const state = useFormState();
   const showAdvanced = useStore((s) => s.showAdvanced);
@@ -40,7 +45,7 @@ export function Field({ path }: FieldProps) {
   // Visibility check (uses live state).
   if (meta.visibleWhen && !meta.visibleWhen(state)) return null;
   // Tier check.
-  if (meta.tier === 'advanced' && !showAdvanced) return null;
+  if (meta.tier === 'advanced' && !showAdvanced && !bypassTier) return null;
 
   const required = meta.requiredWhen ? meta.requiredWhen(state) : false;
   const error = validation.fieldErrors[path];

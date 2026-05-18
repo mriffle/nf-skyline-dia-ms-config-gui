@@ -13,6 +13,12 @@
 
 import type { FormState } from '../params/paramMetadata';
 import type { GraphEdge, GraphNode, WorkflowGraph } from './types';
+import {
+  emptyFacts,
+  factsForQuantSpectra,
+  factsFromPaths,
+  type SpectraTypeFacts,
+} from '../lib/spectraFormat';
 
 // ---------------------------------------------------------------------------
 // Value helpers
@@ -88,89 +94,11 @@ function summarizeStringList(value: unknown): FileSlot {
 // File-type detection — used to gate msconvert / unzip / library conversions
 // ---------------------------------------------------------------------------
 
-type SpectraExt = 'raw' | 'mzml' | 'dzip';
-
-interface SpectraTypeFacts {
-  readonly hasRaw: boolean;
-  readonly hasMzml: boolean;
-  readonly hasDzip: boolean;
-  // True when at least one path's type couldn't be determined (e.g. directory
-  // without a glob, or non-string entries). Implies "could be any of the above".
-  readonly uncertain: boolean;
-  // True when there are no paths to examine at all (e.g. spectra source unset).
-  readonly empty: boolean;
-}
-
-function detectExt(path: string): SpectraExt | null {
-  const lower = path.toLowerCase().trim();
-  if (lower.endsWith('.d.zip')) return 'dzip';
-  if (lower.endsWith('.mzml')) return 'mzml';
-  if (lower.endsWith('.raw')) return 'raw';
-  return null;
-}
-
-function detectFromGlob(glob: unknown): SpectraExt | null {
-  if (!isNonEmptyString(glob)) return null;
-  return detectExt(glob);
-}
-
-function looksLikePath(s: string): boolean {
-  return s.includes('/') || s.includes('\\') || /\.[a-z0-9]+/i.test(s);
-}
-
-function classifyPath(path: string, fallbackGlob: unknown): SpectraExt | 'uncertain' {
-  const direct = detectExt(path);
-  if (direct) return direct;
-  const isFileLike = looksLikePath(path) && /\.[a-z0-9]+$/i.test(path);
-  if (isFileLike) return 'uncertain'; // unknown extension
-  // Otherwise treat as directory — try the glob.
-  const fromGlob = detectFromGlob(fallbackGlob);
-  return fromGlob ?? 'uncertain';
-}
-
-function emptyFacts(): SpectraTypeFacts {
-  return { hasRaw: false, hasMzml: false, hasDzip: false, uncertain: false, empty: true };
-}
-
-function factsFromPaths(paths: readonly string[], fallbackGlob: unknown): SpectraTypeFacts {
-  if (paths.length === 0) return emptyFacts();
-  let hasRaw = false;
-  let hasMzml = false;
-  let hasDzip = false;
-  let uncertain = false;
-  for (const p of paths) {
-    const c = classifyPath(p, fallbackGlob);
-    if (c === 'raw') hasRaw = true;
-    else if (c === 'mzml') hasMzml = true;
-    else if (c === 'dzip') hasDzip = true;
-    else uncertain = true;
-  }
-  return { hasRaw, hasMzml, hasDzip, uncertain, empty: false };
-}
-
-function factsForQuantSpectra(state: FormState): SpectraTypeFacts {
-  const v = state.values['quant_spectra_dir'];
-  const glob = state.values['quant_spectra_glob'];
-  if (v === null || typeof v !== 'object') return emptyFacts();
-  const u = v as { kind?: unknown; path?: unknown; paths?: unknown; entries?: unknown };
-  if (u.kind === 'single' && isNonEmptyString(u.path)) {
-    return factsFromPaths([u.path], glob);
-  }
-  if (u.kind === 'list' && Array.isArray(u.paths)) {
-    const paths = u.paths.filter((p): p is string => typeof p === 'string' && p.length > 0);
-    return factsFromPaths(paths, glob);
-  }
-  if (u.kind === 'batch-map' && Array.isArray(u.entries)) {
-    const paths = u.entries
-      .map((e): string | null => {
-        if (e === null || typeof e !== 'object') return null;
-        const r = e as { path?: unknown };
-        return isNonEmptyString(r.path) ? r.path : null;
-      })
-      .filter((p): p is string => p !== null);
-    return factsFromPaths(paths, glob);
-  }
-  return emptyFacts();
+function quantSpectraFactsFor(state: FormState): SpectraTypeFacts {
+  return factsForQuantSpectra(
+    state.values['quant_spectra_dir'],
+    state.values['quant_spectra_glob'],
+  );
 }
 
 function factsForNarrowSpectra(state: FormState): SpectraTypeFacts {
@@ -182,6 +110,26 @@ function factsForNarrowSpectra(state: FormState): SpectraTypeFacts {
   }
   if (isNonEmptyString(v)) return factsFromPaths([v], glob);
   return emptyFacts();
+}
+
+// PDC files can be any of the three formats. The wizard / form's
+// `quant_input_format` declaration disambiguates; absent that, fall back
+// to vendor RAW (the most common case) but keep `uncertain` so downstream
+// code knows we're guessing.
+function factsFromInputFormat(state: FormState): SpectraTypeFacts {
+  const fmt = state.values['quant_input_format'];
+  if (fmt === 'mzml') {
+    return { hasRaw: false, hasMzml: true, hasDzip: false, uncertain: false, empty: false };
+  }
+  if (fmt === 'dzip') {
+    return { hasRaw: false, hasMzml: false, hasDzip: true, uncertain: false, empty: false };
+  }
+  if (fmt === 'raw') {
+    return { hasRaw: true, hasMzml: false, hasDzip: false, uncertain: false, empty: false };
+  }
+  // Unknown format declared — assume raw (PDC's most common case) but
+  // mark uncertain so msconvert/unzip gating treats it conservatively.
+  return { hasRaw: true, hasMzml: false, hasDzip: false, uncertain: true, empty: false };
 }
 
 function factsForCarafeSpectra(state: FormState): SpectraTypeFacts {
@@ -198,15 +146,11 @@ function factsForCarafeSpectra(state: FormState): SpectraTypeFacts {
     return emptyFacts();
   }
   if (source === 'pdc-files' || source === 'pdc-sample') {
-    // PDC files are vendor RAW.
-    return { hasRaw: true, hasMzml: false, hasDzip: false, uncertain: false, empty: false };
+    // PDC carafe input shares format with the main PDC study (the
+    // workflow downloads whichever format the study has).
+    return factsFromInputFormat(state);
   }
   return emptyFacts();
-}
-
-// PDC downloads always yield vendor RAW files.
-function pdcFacts(): SpectraTypeFacts {
-  return { hasRaw: true, hasMzml: false, hasDzip: false, uncertain: false, empty: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +256,7 @@ export function computeWorkflowGraph(state: FormState): WorkflowGraph {
 
   // For msconvert-only mode the workflow short-circuits; we always show
   // msconvert in that mode (it's the whole point).
-  const wideFacts = isPdc ? pdcFacts() : factsForQuantSpectra(state);
+  const wideFacts = isPdc ? factsFromInputFormat(state) : quantSpectraFactsFor(state);
   const narrowFacts = factsForNarrowSpectra(state);
   const carafeFacts = factsForCarafeSpectra(state);
 
