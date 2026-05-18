@@ -121,7 +121,7 @@ export function UploadControl() {
       });
       return;
     }
-    const mapped = mapToState(parsed.entries);
+    const mapped = mapToState(parsed.entries, parsed.preservedOuterBlocks);
     const current = useStore.getState();
     const confirmReplace = Object.values(current.touched).some((v) => v === true);
     setPreview({ fileName: file.name, parsed, mapped, confirmReplace });

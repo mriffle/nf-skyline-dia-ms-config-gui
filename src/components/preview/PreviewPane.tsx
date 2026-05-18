@@ -10,8 +10,12 @@ export function PreviewPane() {
   const mode = useStore((s) => s.mode);
   const values = useStore((s) => s.values);
   const touched = useStore((s) => s.touched);
+  const preservedOuterText = useStore((s) => s.preservedOuterText);
 
-  const state: FormState = useMemo(() => ({ mode, values, touched }), [mode, values, touched]);
+  const state: FormState = useMemo(
+    () => ({ mode, values, touched, preservedOuterText }),
+    [mode, values, touched, preservedOuterText],
+  );
   const config = useMemo(() => emitConfig(state), [state]);
   const report = useMemo(() => runValidation(state), [state]);
 

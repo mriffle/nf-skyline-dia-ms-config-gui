@@ -34,12 +34,23 @@ describe('parseConfig — emitter goldens parse cleanly', () => {
     expect(goldens.length).toBeGreaterThan(0);
   });
 
+  // Goldens that intentionally carry outer blocks (process { }, etc.) —
+  // for those we expect non-empty preservedOuterBlocks rather than an
+  // empty list. Anything else should round-trip cleanly with no outer
+  // content at all.
+  const GOLDENS_WITH_OUTER_BLOCKS = new Set(['preserved-outer-blocks.config']);
+
   for (const { name, content } of goldens) {
     it(`${name} → parses with no errors and finds a params block`, () => {
       const r = parseConfig(content);
       expect(r.errors).toEqual([]);
       expect(r.hadParamsBlock).toBe(true);
-      expect(r.ignoredOuterBlocks).toEqual([]);
+      if (GOLDENS_WITH_OUTER_BLOCKS.has(name)) {
+        expect(r.preservedOuterBlocks.length).toBeGreaterThan(0);
+      } else {
+        expect(r.preservedOuterBlocks).toEqual([]);
+      }
+      expect(r.ignoredTopLevelAssignments).toEqual([]);
       expect(r.duplicates).toEqual([]);
       // Every golden has at least the alwaysEmit search_engine entry.
       expect(r.entries.length).toBeGreaterThan(0);

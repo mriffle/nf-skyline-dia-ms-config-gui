@@ -26,6 +26,12 @@ export interface AstBlock {
   readonly body: readonly AstNode[];
   readonly line: number;
   readonly col: number;
+  // Source byte offsets covering the block from its leading identifier
+  // through (and including) the matching closing brace. Used by
+  // parseConfig to slice the verbatim text of outer blocks for the
+  // "preserve outside-params" feature.
+  readonly startOffset: number;
+  readonly endOffset: number;
 }
 
 export interface ParseAstResult {
@@ -211,10 +217,16 @@ export function parseTokens(tokens: readonly Token[]): ParseAstResult {
     if (next.kind === 'LBRACE') {
       consume();
       const body = parseBody();
+      let endOffset: number;
       if (peek().kind !== 'RBRACE') {
         err(`Expected '}' to close block '${segments.join('.')}'`, start);
+        // Fall back to the last consumed token's offset so we don't
+        // produce nonsensical end positions for malformed blocks.
+        const last = tokens[Math.max(0, pos - 1)];
+        endOffset = last !== undefined ? last.offset + last.text.length : start.offset;
       } else {
-        consume();
+        const closing = consume();
+        endOffset = closing.offset + closing.text.length;
       }
       return {
         kind: 'block',
@@ -222,6 +234,8 @@ export function parseTokens(tokens: readonly Token[]): ParseAstResult {
         body,
         line: start.line,
         col: start.col,
+        startOffset: start.offset,
+        endOffset,
       };
     }
     err(

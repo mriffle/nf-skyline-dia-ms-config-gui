@@ -200,6 +200,7 @@ StoreState = {
   mode: 'general' | 'pdc',
   values: Record<string, unknown>,
   touched: Record<string, boolean>,
+  preservedOuterText?: string,   // see §9 — verbatim outer blocks from upload
   showAdvanced: boolean,
   activeSection: SectionId | null,
   storeVersion: <CURRENT_STORE_VERSION>,
@@ -249,6 +250,12 @@ an **override** file. Schema defaults are shown in the UI as placeholder
 For `alwaysEmit` params: the emitter takes the value from
 `state.values[path]` if present (even when not touched — e.g. seeded by
 `createDefaultState`), otherwise falls back to `getEffectiveDefault(meta)`.
+
+Verbatim text in `state.preservedOuterText` (captured from a previously
+uploaded config — see §9) is appended after the closing `}` of
+`params { }` under a banner. This is the one exception to "only emit
+what's modelled in metadata": it's user-provided source carried through
+without re-parsing.
 
 ### 5. Validation
 
@@ -474,8 +481,13 @@ text → parseConfig (lex + parse + locate params { } + flatten)
   `profiles { standard { params { } } }`). Supports the
   `params.pdc { ... }` shorthand (segments after `params` become a
   prefix). Flattens block + dotted forms into a single `(path, value)`
-  entry list. Deduplicates with last-wins; tracks ignored outer blocks
-  (`process { }`, top-level assignments) for the report.
+  entry list. Deduplicates with last-wins. Outer scope is split into two
+  buckets: `preservedOuterBlocks` (named braced blocks like `process { }`
+  / `profiles { }`, captured verbatim as a source slice via the
+  start/end offsets attached to `AstBlock`) and
+  `ignoredTopLevelAssignments` (bare `foo = 'x'` at file scope, still
+  discarded — there's no good way to round-trip them without evaluating
+  the RHS).
 - `mapToState.ts` — entries → `FormState` + `UploadReport`. The most
   judgment-heavy module; see decisions below.
 
@@ -533,26 +545,57 @@ file. This includes `alwaysEmit`-eligible paths if they appear.
 - *Loaded with notes* (amber): `range-violation`,
   `string-coerced-to-list`, `list-truncated-to-string`,
   `mode-ambiguity`, `carafe-source-mismatch`.
-- Plus parse-time `duplicates` and `ignoredOuterBlocks` rendered
+- Plus parse-time `duplicates` (amber), `preservedOuterBlocks` (info /
+  sky-blue), and `ignoredTopLevelAssignments` (amber) rendered
   separately.
 
+**Outer-block preservation** — named braced blocks alongside `params { }`
+(`process { }`, `profiles { }`, `docker { }`, etc.) survive a round-trip
+verbatim:
+1. `parseConfig` slices their source text via the start/end offsets the
+   parser captures on `AstBlock` and exposes them as
+   `preservedOuterBlocks` on `ParseResult`.
+2. `mapToState(entries, preservedOuterBlocks)` concatenates the slices
+   with one blank line between them and writes them to
+   `state.preservedOuterText` (optional field on `FormState`,
+   undefined when there's nothing to preserve). Report carries
+   `preservedOuterBlockNames` for the dialog summary.
+3. `emitConfig` appends them after the closing `}` of `params { }`
+   under a `// === Preserved from uploaded config ===` banner. Verbatim
+   — the captured text is not re-formatted or re-validated.
+4. The form pane shows `PreservedBlocksNotice` (sky-blue, with a
+   collapsible "Show content" pre) above the section list while
+   `preservedOuterText` is non-empty.
+5. `reset` clears the field; `loadFromConfig` replaces it; the wrapping
+   `profiles { }` around a chosen nested `params { }` is *not*
+   preserved (re-emitting it would duplicate everything in `params`).
+
 **Store integration**: a `loadFromConfig(loaded)` action atomically
-replaces `mode`, `values`, `touched`. Loaded values are layered ON TOP
-of `createDefaultState()` seeds so paths the file doesn't mention
-(e.g. `qc_report.skip` if absent) still read sensible defaults.
-Bypasses `setMode`'s clearing logic — the loaded state is already
-mode-coherent for the target mode. Resets `activeSection`; preserves
-`showAdvanced` (UI density preference).
+replaces `mode`, `values`, `touched`, `preservedOuterText`. Loaded
+values are layered ON TOP of `createDefaultState()` seeds so paths the
+file doesn't mention (e.g. `qc_report.skip` if absent) still read
+sensible defaults. Bypasses `setMode`'s clearing logic — the loaded
+state is already mode-coherent for the target mode. Resets
+`activeSection`; preserves `showAdvanced` (UI density preference).
+`reset` must explicitly set `preservedOuterText: undefined` because
+Zustand's `set` merges with current state and `createDefaultState`
+doesn't carry the field.
 
 **UI** (`src/components/upload/`):
 - `UploadControl.tsx` — header button next to Reset, hidden file
   input, lifecycle state. Uses `FileReader` rather than
-  `File.text()` for jsdom compat.
+  `File.text()` for jsdom compat. Passes
+  `parsed.preservedOuterBlocks` into `mapToState` as the second arg.
 - `UploadDialog.tsx` — preview modal: summary, replace warning when
-  current touched, collapsible discarded + advisory issue groups,
-  Cancel / Load. Escape cancels.
+  current touched, collapsible discarded (red) + advisory (amber) +
+  preserved (sky-blue, info tone) issue groups, Cancel / Load.
+  Escape cancels.
 - `UploadErrorDialog.tsx` — shown when no `params { }` block was
   found or the parse couldn't produce any entries.
+- `src/components/form/PreservedBlocksNotice.tsx` — informational
+  banner shown in the form pane (between `ValidationSummary` and the
+  section list) when `state.preservedOuterText` is non-empty. Shows
+  block names and a collapsible verbatim view.
 
 **Round-trip stability** — two properties verified by
 `src/parse/__tests__/roundtrip.test.ts`:
@@ -564,9 +607,9 @@ mode-coherent for the target mode. Resets `activeSection`; preserves
    `alwaysEmit`-eligible field for the chosen engine
    (`general-cascadia.config`, `general-diann-minimal.config`,
    `general-encyclopedia-narrow-wide.config`, `general-no-search.config`,
-   `pdc-diann-simple.config`). The other goldens were constructed with
-   stripped emit-test states; see "Hard rules" gotcha on engine-predicate
-   asymmetry below.
+   `pdc-diann-simple.config`, `preserved-outer-blocks.config`). The
+   other goldens were constructed with stripped emit-test states; see
+   "Hard rules" gotcha on engine-predicate asymmetry below.
 
 ### 10. Wizard (guided form entry)
 

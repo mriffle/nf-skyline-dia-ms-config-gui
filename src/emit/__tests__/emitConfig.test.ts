@@ -170,6 +170,17 @@ describe('emitConfig — golden files', () => {
     });
     expect(emit(state)).toBe(golden('escape-edges.config'));
   });
+
+  it('preserved outer blocks are appended verbatim after params { }', () => {
+    const state: FormState = {
+      mode: 'general',
+      values: { fasta: '/db.fasta', search_engine: 'diann' },
+      touched: { fasta: true, search_engine: true },
+      preservedOuterText:
+        "process {\n    cpus = 4\n    memory = '16 GB'\n}\n\nprofiles {\n    standard { process.executor = 'local' }\n    cluster  { process.executor = 'slurm' }\n}",
+    };
+    expect(emit(state)).toBe(golden('preserved-outer-blocks.config'));
+  });
 });
 
 describe('emitConfig — virtual params are skipped', () => {
@@ -242,5 +253,67 @@ describe('emitConfig — untouched values are skipped', () => {
     const out = emit(state);
     expect(out).toContain("fasta = '/db.fasta'");
     expect(out).not.toContain('spectral_library');
+  });
+});
+
+describe('emitConfig — affects-only paths (no direct ParamMeta)', () => {
+  // quant_spectra_glob et al. are reachable only via a virtual parent's
+  // `affects` list. They must still be emitted when touched — section
+  // and ordering inherit from the parent virtual.
+  it('emits quant_spectra_glob in the general input section', () => {
+    const state = makeState({
+      values: { quant_spectra_glob: '*.mzML' },
+    });
+    const out = emit(state);
+    expect(out).toContain("quant_spectra_glob = '*.mzML'");
+    expect(out).toContain('Input data (general)');
+  });
+
+  it('emits chromatogram_library_spectra_glob alongside the general input section', () => {
+    const state = makeState({
+      values: { chromatogram_library_spectra_glob: '*.raw' },
+    });
+    const out = emit(state);
+    expect(out).toContain("chromatogram_library_spectra_glob = '*.raw'");
+  });
+
+  it('emits carafe glob/regex paths when Carafe is configured', () => {
+    const state = makeState({
+      values: { 'carafe.spectra_glob': '*.d.zip' },
+    });
+    const out = emit(state);
+    expect(out).toContain("carafe.spectra_glob = '*.d.zip'");
+  });
+});
+
+describe('emitConfig — hidden / unmodeled preserved params', () => {
+  // Touched paths that have no direct ParamMeta and no virtual-parent
+  // fallback (typically hidden infra params like images.*) emit at the
+  // end of params { } under a "Preserved from uploaded config" banner.
+  it('renders images.* under the preserved sub-block at the end of params', () => {
+    const state: FormState = {
+      mode: 'general',
+      values: {
+        fasta: '/db.fasta',
+        'images.diann': 'quay.io/user/diann:custom',
+        'images.proteowizard': 'quay.io/user/pwiz:custom',
+      },
+      touched: {
+        fasta: true,
+        'images.diann': true,
+        'images.proteowizard': true,
+      },
+    };
+    const out = emit(state);
+    expect(out).toContain("fasta = '/db.fasta'");
+    expect(out).toContain('Preserved from uploaded config');
+    expect(out).toContain("diann = 'quay.io/user/diann:custom'");
+    expect(out).toContain("proteowizard = 'quay.io/user/pwiz:custom'");
+    // Should namespace-collapse into an images { } block.
+    expect(out).toContain('images {');
+    // Preserved sub-block must come after the regular sections.
+    expect(out.indexOf("fasta = '/db.fasta'")).toBeLessThan(
+      out.indexOf('Preserved from uploaded config'),
+    );
   });
 });

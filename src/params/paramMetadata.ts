@@ -12,6 +12,11 @@ export interface FormState {
   readonly mode: Mode;
   readonly values: Record<string, unknown>;
   readonly touched: Record<string, boolean>;
+  // Verbatim text of outer blocks captured from an uploaded config
+  // (process { }, profiles { }, etc.). Appended after the generated
+  // params { } block on emit. Empty / absent when nothing was uploaded
+  // or after a Reset.
+  readonly preservedOuterText?: string;
 }
 
 export type Widget =

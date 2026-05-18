@@ -230,6 +230,30 @@ describe('loadFromConfig (upload)', () => {
     expect(s.activeSection).toBe(null);
     expect(s.showAdvanced).toBe(true);
   });
+
+  it('loads preservedOuterText from the upload', () => {
+    const { loadFromConfig } = useStore.getState();
+    loadFromConfig({
+      mode: 'general',
+      values: { fasta: '/db.fasta' },
+      touched: { fasta: true },
+      preservedOuterText: 'process { cpus = 4 }',
+    });
+    expect(useStore.getState().preservedOuterText).toBe('process { cpus = 4 }');
+  });
+
+  it('reset clears preservedOuterText', () => {
+    const { loadFromConfig, reset } = useStore.getState();
+    loadFromConfig({
+      mode: 'general',
+      values: { fasta: '/db.fasta' },
+      touched: { fasta: true },
+      preservedOuterText: 'process { cpus = 4 }',
+    });
+    expect(useStore.getState().preservedOuterText).toBe('process { cpus = 4 }');
+    reset();
+    expect(useStore.getState().preservedOuterText).toBeUndefined();
+  });
 });
 
 describe('localStorage persistence', () => {
@@ -240,6 +264,6 @@ describe('localStorage persistence', () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!);
     expect(parsed.state.values.fasta).toBe('/persisted.fasta');
-    expect(parsed.version).toBe(5);
+    expect(parsed.version).toBe(6);
   });
 });

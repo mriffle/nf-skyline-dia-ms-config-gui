@@ -30,6 +30,7 @@ export interface Token {
   readonly text: string; // raw lexeme for diagnostics
   readonly line: number; // 1-based
   readonly col: number; // 1-based
+  readonly offset: number; // 0-based byte offset in source (token start)
   // Decoded value for STRING/NUMBER/BOOL/NULL. undefined for syntax tokens.
   readonly value?: string | number | boolean | null;
 }
@@ -62,9 +63,10 @@ export function lex(source: string): LexResult {
     text: string,
     l: number,
     c: number,
+    offset: number,
     value?: string | number | boolean | null,
   ): void {
-    tokens.push({ kind, text, line: l, col: c, value });
+    tokens.push({ kind, text, line: l, col: c, offset, value });
   }
 
   function pushErr(message: string, l: number, c: number): void {
@@ -213,7 +215,7 @@ export function lex(source: string): LexResult {
         advance();
       }
       if (!closed) pushErr('Unterminated triple-quoted string', startLine, startCol);
-      pushTok('STRING', source.slice(startIdx, i), startLine, startCol, value);
+      pushTok('STRING', source.slice(startIdx, i), startLine, startCol, startIdx, value);
       return;
     }
 
@@ -254,7 +256,7 @@ export function lex(source: string): LexResult {
     if (!closed && i >= len) {
       pushErr('Unterminated string literal', startLine, startCol);
     }
-    pushTok('STRING', source.slice(startIdx, i), startLine, startCol, value);
+    pushTok('STRING', source.slice(startIdx, i), startLine, startCol, startIdx, value);
   }
 
   function lexNumber(): void {
@@ -298,7 +300,7 @@ export function lex(source: string): LexResult {
 
     if (!hasDigits) {
       pushErr('Invalid number literal', startLine, startCol);
-      pushTok('NUMBER', source.slice(startIdx, i), startLine, startCol, 0);
+      pushTok('NUMBER', source.slice(startIdx, i), startLine, startCol, startIdx, 0);
       return;
     }
 
@@ -307,10 +309,10 @@ export function lex(source: string): LexResult {
     const value = Number(cleaned);
     if (!Number.isFinite(value)) {
       pushErr(`Invalid number: ${raw}`, startLine, startCol);
-      pushTok('NUMBER', raw, startLine, startCol, 0);
+      pushTok('NUMBER', raw, startLine, startCol, startIdx, 0);
       return;
     }
-    pushTok('NUMBER', raw, startLine, startCol, value);
+    pushTok('NUMBER', raw, startLine, startCol, startIdx, value);
   }
 
   function lexIdent(): void {
@@ -322,22 +324,23 @@ export function lex(source: string): LexResult {
     const text = source.slice(startIdx, i);
     switch (text) {
       case 'true':
-        pushTok('BOOL', text, startLine, startCol, true);
+        pushTok('BOOL', text, startLine, startCol, startIdx, true);
         return;
       case 'false':
-        pushTok('BOOL', text, startLine, startCol, false);
+        pushTok('BOOL', text, startLine, startCol, startIdx, false);
         return;
       case 'null':
-        pushTok('NULL', text, startLine, startCol, null);
+        pushTok('NULL', text, startLine, startCol, startIdx, null);
         return;
       default:
-        pushTok('IDENT', text, startLine, startCol);
+        pushTok('IDENT', text, startLine, startCol, startIdx);
     }
   }
 
   while (i < len) {
     const startLine = line;
     const startCol = col;
+    const startIdx = i;
     const c = source[i];
 
     // Whitespace.
@@ -359,31 +362,31 @@ export function lex(source: string): LexResult {
     // Single-char punctuators.
     switch (c) {
       case '{':
-        pushTok('LBRACE', '{', startLine, startCol);
+        pushTok('LBRACE', '{', startLine, startCol, startIdx);
         advance();
         continue;
       case '}':
-        pushTok('RBRACE', '}', startLine, startCol);
+        pushTok('RBRACE', '}', startLine, startCol, startIdx);
         advance();
         continue;
       case '[':
-        pushTok('LBRACKET', '[', startLine, startCol);
+        pushTok('LBRACKET', '[', startLine, startCol, startIdx);
         advance();
         continue;
       case ']':
-        pushTok('RBRACKET', ']', startLine, startCol);
+        pushTok('RBRACKET', ']', startLine, startCol, startIdx);
         advance();
         continue;
       case '=':
-        pushTok('EQ', '=', startLine, startCol);
+        pushTok('EQ', '=', startLine, startCol, startIdx);
         advance();
         continue;
       case ':':
-        pushTok('COLON', ':', startLine, startCol);
+        pushTok('COLON', ':', startLine, startCol, startIdx);
         advance();
         continue;
       case ',':
-        pushTok('COMMA', ',', startLine, startCol);
+        pushTok('COMMA', ',', startLine, startCol, startIdx);
         advance();
         continue;
       default:
@@ -396,7 +399,7 @@ export function lex(source: string): LexResult {
         lexNumber();
         continue;
       }
-      pushTok('DOT', '.', startLine, startCol);
+      pushTok('DOT', '.', startLine, startCol, startIdx);
       advance();
       continue;
     }
@@ -425,6 +428,6 @@ export function lex(source: string): LexResult {
     advance();
   }
 
-  pushTok('EOF', '', line, col);
+  pushTok('EOF', '', line, col, i);
   return { tokens, errors };
 }

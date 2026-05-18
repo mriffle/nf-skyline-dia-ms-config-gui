@@ -46,6 +46,7 @@ const BYTE_STABLE_GOLDENS = new Set([
   'general-encyclopedia-narrow-wide.config',
   'general-no-search.config',
   'pdc-diann-simple.config',
+  'preserved-outer-blocks.config',
 ]);
 
 function loadGoldens(): { name: string; content: string }[] {
@@ -62,13 +63,12 @@ function loadAndEmit(content: string): string {
   const parsed = parseConfig(content);
   expect(parsed.errors).toEqual([]);
   expect(parsed.hadParamsBlock).toBe(true);
-  const mapped = mapToState(parsed.entries);
+  const mapped = mapToState(parsed.entries, parsed.preservedOuterBlocks);
   const hardIssues = mapped.report.issues.filter(
     (i) =>
       i.kind === 'type-mismatch' ||
       i.kind === 'enum-mismatch' ||
-      i.kind === 'unknown-param' ||
-      i.kind === 'hidden-param',
+      i.kind === 'unknown-param',
   );
   expect(hardIssues).toEqual([]);
   return emitConfig(mapped.state, FIXED_OPTIONS);

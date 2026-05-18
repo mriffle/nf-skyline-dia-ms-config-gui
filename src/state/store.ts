@@ -101,7 +101,10 @@ export const useStore = create<Store>()(
       setShowAdvanced: (show) => set({ showAdvanced: show }),
       setActiveSection: (id) => set({ activeSection: id }),
 
-      reset: () => set(createDefaultState()),
+      // Zustand's set merges with current state, so we must explicitly
+      // clear preservedOuterText (which isn't a field on createDefaultState)
+      // to ensure an uploaded outer-block bundle gets wiped on Reset.
+      reset: () => set({ ...createDefaultState(), preservedOuterText: undefined }),
 
       loadFromConfig: (loaded) => {
         const baseline = createDefaultState();
@@ -109,6 +112,7 @@ export const useStore = create<Store>()(
           mode: loaded.mode,
           values: { ...baseline.values, ...loaded.values },
           touched: loaded.touched,
+          preservedOuterText: loaded.preservedOuterText,
           // Reset transient navigation so the form scrolls to the top.
           // showAdvanced is intentionally preserved — it's a UI density
           // preference, not config state.
@@ -124,6 +128,7 @@ export const useStore = create<Store>()(
         mode: s.mode,
         values: s.values,
         touched: s.touched,
+        preservedOuterText: s.preservedOuterText,
         showAdvanced: s.showAdvanced,
         activeSection: s.activeSection,
         storeVersion: s.storeVersion,

@@ -15,7 +15,9 @@ export interface StoreState extends FormState {
 //       their effective defaults from first render.
 //   v5: skyline.group_proteins pre-seeded to true to match the new
 //       defaultOverride (builder ships a "group by default" stance).
-export const CURRENT_STORE_VERSION = 5;
+//   v6: preservedOuterText added to persisted state for outer-block
+//       round-trip support.
+export const CURRENT_STORE_VERSION = 6;
 
 export const createDefaultState = (): StoreState => ({
   mode: 'general',

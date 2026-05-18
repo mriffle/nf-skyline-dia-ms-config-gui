@@ -18,6 +18,7 @@
 
 import {
   IGNORED_PARAM_PATHS,
+  paramMetadata,
   paramMetadataByPath,
   type FormState,
   type Mode,
@@ -25,7 +26,7 @@ import {
 } from '../params/paramMetadata';
 import { schemaDerived } from '../params/schemaDerived.generated';
 import type { SchemaDerivedEntry, SchemaShape } from '../params/schemaTypes';
-import type { ParsedEntry, ParsedValue } from './types';
+import type { ParsedEntry, ParsedValue, PreservedOuterBlock } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,7 +34,7 @@ import type { ParsedEntry, ParsedValue } from './types';
 
 export type UploadIssue =
   | { kind: 'unknown-param'; path: string; rawValue: ParsedValue; line: number }
-  | { kind: 'hidden-param'; path: string; line: number }
+  | { kind: 'hidden-param-preserved'; path: string; line: number }
   | { kind: 'ignored-param'; path: string; line: number }
   | {
       kind: 'type-mismatch';
@@ -83,6 +84,10 @@ export interface UploadReport {
   readonly modeAmbiguous: boolean;
   readonly inferredCarafeEnabled: boolean;
   readonly inferredCarafeSource: string | null;
+  // Names of outer blocks (process, profiles, docker, ...) whose
+  // verbatim text was preserved and will be appended to the generated
+  // config after the params { } block.
+  readonly preservedOuterBlockNames: readonly string[];
   readonly issues: readonly UploadIssue[];
 }
 
@@ -97,23 +102,48 @@ export interface MapResult {
 
 type Classification =
   | { kind: 'ignored' }
-  | { kind: 'hidden' }
+  // Path is real schema but marked hidden — load it into state anyway so
+  // power-user customizations (image pins, infra settings) round-trip,
+  // but flag it as preserved so the UI can surface that it was carried
+  // over without being editable.
+  | { kind: 'hidden-preserved'; schema: SchemaDerivedEntry }
   | { kind: 'unknown' }
   | { kind: 'ok'; schema: SchemaDerivedEntry; meta: ParamMeta };
+
+// Some real schema paths have no direct ParamMeta — they're only
+// reachable through a virtual entry's `affects` list (e.g.
+// `quant_spectra_glob` is exposed via the `quant_spectra_files`
+// glob-regex-pair widget). The form writes them, the emitter emits
+// them, and they must load back. Map each such path to its parent
+// virtual ParamMeta so coerce decisions (e.g. string-or-list widget
+// choice) have something to consult.
+const VIRTUAL_PARENT_BY_AFFECTED_PATH: ReadonlyMap<string, ParamMeta> = (() => {
+  const directlyBound = new Set<string>();
+  for (const meta of paramMetadata) {
+    if (meta.virtual !== true) directlyBound.add(meta.path);
+  }
+  const out = new Map<string, ParamMeta>();
+  for (const meta of paramMetadata) {
+    if (!meta.affects) continue;
+    for (const affected of meta.affects) {
+      if (directlyBound.has(affected)) continue; // has its own meta
+      if (out.has(affected)) continue; // first-declared virtual wins
+      out.set(affected, meta);
+    }
+  }
+  return out;
+})();
 
 function classify(path: string): Classification {
   if (IGNORED_PARAM_PATHS.has(path)) return { kind: 'ignored' };
   const schema = schemaDerived[path];
   if (!schema) return { kind: 'unknown' };
-  if (schema.hidden) return { kind: 'hidden' };
+  if (schema.hidden) return { kind: 'hidden-preserved', schema };
   const meta = paramMetadataByPath[path];
-  if (!meta) {
-    // Schema knows about it but UI doesn't surface it. Treat as unknown
-    // so the user is warned. (In practice the metadata-coverage test
-    // ensures this doesn't happen.)
-    return { kind: 'unknown' };
-  }
-  return { kind: 'ok', schema, meta };
+  if (meta) return { kind: 'ok', schema, meta };
+  const parentVirtual = VIRTUAL_PARENT_BY_AFFECTED_PATH.get(path);
+  if (parentVirtual) return { kind: 'ok', schema, meta: parentVirtual };
+  return { kind: 'unknown' };
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +171,7 @@ function coerce(
   path: string,
   rawValue: ParsedValue,
   schema: SchemaDerivedEntry,
-  meta: ParamMeta,
+  meta: ParamMeta | undefined,
   line: number,
 ): CoerceResult {
   // The quant_spectra_dir tagged union is the inverse of the emitter's
@@ -239,10 +269,10 @@ function coerceStringOrList(
   path: string,
   rawValue: ParsedValue,
   shape: SchemaShape,
-  meta: ParamMeta,
+  meta: ParamMeta | undefined,
   line: number,
 ): CoerceResult {
-  const wantsList = meta.widget === 'string-list';
+  const wantsList = meta?.widget === 'string-list';
   if (typeof rawValue === 'string') {
     if (wantsList) {
       return {
@@ -430,7 +460,10 @@ function inferCarafe(
 // unknown — they feed the carafe inference instead.
 const UI_VIRTUAL_HINTS = new Set(['use_carafe', 'carafe.source']);
 
-export function mapToState(entries: readonly ParsedEntry[]): MapResult {
+export function mapToState(
+  entries: readonly ParsedEntry[],
+  preservedOuterBlocks: readonly PreservedOuterBlock[] = [],
+): MapResult {
   const values: Record<string, unknown> = {};
   const touched: Record<string, boolean> = {};
   const issues: UploadIssue[] = [];
@@ -480,9 +513,6 @@ export function mapToState(entries: readonly ParsedEntry[]): MapResult {
       case 'ignored':
         issues.push({ kind: 'ignored-param', path: entry.path, line: entry.line });
         continue;
-      case 'hidden':
-        issues.push({ kind: 'hidden-param', path: entry.path, line: entry.line });
-        continue;
       case 'unknown':
         issues.push({
           kind: 'unknown-param',
@@ -491,14 +521,10 @@ export function mapToState(entries: readonly ParsedEntry[]): MapResult {
           line: entry.line,
         });
         continue;
+      case 'hidden-preserved':
       case 'ok': {
-        const result = coerce(
-          entry.path,
-          entry.value,
-          cls.schema,
-          cls.meta,
-          entry.line,
-        );
+        const meta = cls.kind === 'ok' ? cls.meta : undefined;
+        const result = coerce(entry.path, entry.value, cls.schema, meta, entry.line);
         if (!result.ok) {
           issues.push(result.issue);
           continue;
@@ -508,6 +534,13 @@ export function mapToState(entries: readonly ParsedEntry[]): MapResult {
         loadedCount++;
         if (result.extraIssues) {
           for (const i of result.extraIssues) issues.push(i);
+        }
+        if (cls.kind === 'hidden-preserved') {
+          issues.push({
+            kind: 'hidden-param-preserved',
+            path: entry.path,
+            line: entry.line,
+          });
         }
         break;
       }
@@ -543,13 +576,27 @@ export function mapToState(entries: readonly ParsedEntry[]): MapResult {
     });
   }
 
-  const state: FormState = { mode: modeInfo.mode, values, touched };
+  // Outer-block preservation. Concatenate verbatim slices in source
+  // order with a single blank line between them; the emitter renders a
+  // banner above and trailing newline below.
+  const preservedOuterText =
+    preservedOuterBlocks.length === 0
+      ? undefined
+      : preservedOuterBlocks.map((b) => b.text).join('\n\n');
+
+  const state: FormState = {
+    mode: modeInfo.mode,
+    values,
+    touched,
+    ...(preservedOuterText !== undefined ? { preservedOuterText } : {}),
+  };
   const report: UploadReport = {
     loadedCount,
     detectedMode: modeInfo.mode,
     modeAmbiguous: modeInfo.ambiguous,
     inferredCarafeEnabled: carafe.enabled,
     inferredCarafeSource: carafe.source,
+    preservedOuterBlockNames: preservedOuterBlocks.map((b) => b.name),
     issues,
   };
   return { state, report };

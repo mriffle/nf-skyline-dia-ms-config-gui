@@ -73,8 +73,37 @@ const PATH_INFO: ReadonlyMap<string, PathInfo> = (() => {
   return m;
 })();
 
+// Real schema paths exposed only through a virtual entry's `affects`
+// list (e.g. `quant_spectra_glob` reachable via the glob-regex-pair
+// `quant_spectra_files`). They're emitted without a per-param comment
+// but still need a section assignment and an ordering hint, both
+// inherited from the parent virtual.
+const VIRTUAL_PARENT_BY_AFFECTED_PATH: ReadonlyMap<string, ParamMeta> = (() => {
+  const directlyBound = new Set<string>();
+  for (const meta of paramMetadata) {
+    if (meta.virtual !== true) directlyBound.add(meta.path);
+  }
+  const out = new Map<string, ParamMeta>();
+  for (const meta of paramMetadata) {
+    if (!meta.affects) continue;
+    for (const affected of meta.affects) {
+      if (directlyBound.has(affected)) continue;
+      if (out.has(affected)) continue;
+      out.set(affected, meta);
+    }
+  }
+  return out;
+})();
+
 function infoForPath(path: string): PathInfo {
-  return PATH_INFO.get(path) ?? { virtualOnly: false, order: Number.POSITIVE_INFINITY };
+  const direct = PATH_INFO.get(path);
+  if (direct) return direct;
+  const parent = VIRTUAL_PARENT_BY_AFFECTED_PATH.get(path);
+  if (parent) {
+    const parentInfo = PATH_INFO.get(parent.path);
+    if (parentInfo) return { virtualOnly: false, order: parentInfo.order };
+  }
+  return { virtualOnly: false, order: Number.POSITIVE_INFINITY };
 }
 
 // ---------------------------------------------------------------------------
@@ -158,22 +187,40 @@ interface SectionEntries {
   readonly entries: OrderedEntry[];
 }
 
-function groupBySection(entries: readonly OrderedEntry[]): SectionEntries[] {
+interface GroupedEntries {
+  readonly sectionGroups: SectionEntries[];
+  // Entries with no direct ParamMeta and no virtual-parent fallback —
+  // typically hidden / infrastructure params loaded verbatim from an
+  // uploaded config. Rendered in their own banner at the end of
+  // params { }.
+  readonly preservedEntries: OrderedEntry[];
+}
+
+function groupBySection(entries: readonly OrderedEntry[]): GroupedEntries {
   const bySectionId = new Map<SectionId, OrderedEntry[]>();
+  const preservedEntries: OrderedEntry[] = [];
   for (const entry of entries) {
-    const meta = paramMetadataByPath[entry.path];
-    if (!meta) continue;
+    const meta =
+      paramMetadataByPath[entry.path] ??
+      VIRTUAL_PARENT_BY_AFFECTED_PATH.get(entry.path);
+    if (!meta) {
+      preservedEntries.push(entry);
+      continue;
+    }
     const bucket = bySectionId.get(meta.section);
     if (bucket) bucket.push(entry);
     else bySectionId.set(meta.section, [entry]);
   }
-  const out: SectionEntries[] = [];
+  const sectionGroups: SectionEntries[] = [];
   for (const section of sections) {
     const e = bySectionId.get(section.id);
     if (!e || e.length === 0) continue;
-    out.push({ section, entries: e });
+    sectionGroups.push({ section, entries: e });
   }
-  return out;
+  preservedEntries.sort((a, b) =>
+    a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+  );
+  return { sectionGroups, preservedEntries };
 }
 
 // ---------------------------------------------------------------------------
@@ -310,21 +357,69 @@ export function emitConfig(state: FormState, options?: EmitOptions): string {
   const head = header(version, timestamp);
 
   const all = collectEntries(state);
-  const sectionGroups = groupBySection(all);
-  if (sectionGroups.length === 0) {
-    return `${head}\nparams { }\n`;
-  }
+  const grouped = groupBySection(all);
+  const empty = grouped.sectionGroups.length === 0 && grouped.preservedEntries.length === 0;
+  const paramsBody = empty ? 'params { }' : renderParamsBlock(grouped);
 
+  return `${head}\n${paramsBody}\n${renderPreservedOuterBlocks(state.preservedOuterText)}`;
+}
+
+function renderParamsBlock(grouped: GroupedEntries): string {
   const bodyLines: string[] = [];
-  for (let i = 0; i < sectionGroups.length; i++) {
+  for (let i = 0; i < grouped.sectionGroups.length; i++) {
     if (i > 0) bodyLines.push('');
-    const { section, entries } = sectionGroups[i]!;
+    const { section, entries } = grouped.sectionGroups[i]!;
     const tree = buildNamespaceTree(entries);
     const topNodes = freezeTree(tree);
     bodyLines.push(...renderSectionBanner(section, 1));
     bodyLines.push('');
     bodyLines.push(...renderNodes(topNodes, 1));
   }
+  if (grouped.preservedEntries.length > 0) {
+    if (grouped.sectionGroups.length > 0) bodyLines.push('');
+    bodyLines.push(...renderPreservedParamsBanner(1));
+    bodyLines.push('');
+    const tree = buildNamespaceTree(grouped.preservedEntries);
+    const topNodes = freezeTree(tree);
+    bodyLines.push(...renderNodes(topNodes, 1));
+  }
+  return `params {\n${bodyLines.join('\n')}\n}`;
+}
 
-  return `${head}\nparams {\n${bodyLines.join('\n')}\n}\n`;
+// Banner above the "preserved params" sub-block inside params { } —
+// covers hidden / infrastructure params that were loaded from an
+// uploaded config but aren't surfaced in the form (e.g. `images.*`).
+function renderPreservedParamsBanner(level: number): string[] {
+  const indent = INDENT.repeat(level);
+  const bar = `${indent}// ${'='.repeat(BANNER_BAR_WIDTH)}`;
+  return [
+    bar,
+    `${indent}// Preserved from uploaded config`,
+    bar,
+    ...wrapCommentLines(
+      'Parameters loaded verbatim from your uploaded config that are not surfaced in the form (typically infrastructure or pinned image versions). Use Reset to remove them.',
+      level,
+    ),
+  ];
+}
+
+// Preserved outer blocks (process { }, profiles { }, ...) captured from
+// a previously uploaded config. Rendered verbatim after the params { }
+// block under an explanatory banner so the user can tell what came from
+// where. Empty string when there's nothing to preserve.
+function renderPreservedOuterBlocks(text: string | undefined): string {
+  if (text === undefined || text.length === 0) return '';
+  const banner = [
+    '',
+    `// ${'='.repeat(BANNER_BAR_WIDTH)}`,
+    '// Preserved from uploaded config',
+    `// ${'='.repeat(BANNER_BAR_WIDTH)}`,
+    '// These blocks were present in the uploaded config alongside',
+    '// params { }. They are emitted verbatim and not validated.',
+    '// Use Reset in the form to remove them.',
+    '',
+  ].join('\n');
+  // Ensure trailing newline so the file always ends cleanly.
+  const trimmed = text.replace(/\s+$/, '');
+  return `${banner}${trimmed}\n`;
 }

@@ -9,10 +9,11 @@ import { lex } from './groovyLexer';
 import { parseTokens, type AstBlock, type AstNode } from './groovyParser';
 import type {
   DuplicatePath,
-  IgnoredOuterBlock,
+  IgnoredTopLevelAssignment,
   ParseError,
   ParseResult,
   ParsedEntry,
+  PreservedOuterBlock,
 } from './types';
 
 export function parseConfig(text: string): ParseResult {
@@ -21,16 +22,15 @@ export function parseConfig(text: string): ParseResult {
   const errors: ParseError[] = [...lexed.errors, ...parsed.errors];
 
   const located = findParamsBlock(parsed.nodes, []);
-  const ignoredOuterBlocks: IgnoredOuterBlock[] = collectIgnoredOuterBlocks(
-    parsed.nodes,
-    located,
-  );
+  const { preservedOuterBlocks, ignoredTopLevelAssignments } =
+    collectOuterScope(parsed.nodes, located, text);
 
   if (!located) {
     return {
       entries: [],
       errors,
-      ignoredOuterBlocks,
+      preservedOuterBlocks,
+      ignoredTopLevelAssignments,
       duplicates: [],
       hadParamsBlock: false,
     };
@@ -44,7 +44,8 @@ export function parseConfig(text: string): ParseResult {
   return {
     entries,
     errors,
-    ignoredOuterBlocks,
+    preservedOuterBlocks,
+    ignoredTopLevelAssignments,
     duplicates,
     hadParamsBlock: true,
   };
@@ -87,19 +88,26 @@ function findParamsBlock(
   return null;
 }
 
-function collectIgnoredOuterBlocks(
+interface OuterScope {
+  readonly preservedOuterBlocks: PreservedOuterBlock[];
+  readonly ignoredTopLevelAssignments: IgnoredTopLevelAssignment[];
+}
+
+function collectOuterScope(
   topLevel: readonly AstNode[],
   located: LocatedParams | null,
-): IgnoredOuterBlock[] {
-  const out: IgnoredOuterBlock[] = [];
+  source: string,
+): OuterScope {
+  const preservedOuterBlocks: PreservedOuterBlock[] = [];
+  const ignoredTopLevelAssignments: IgnoredTopLevelAssignment[] = [];
   // Identify the top-level node that contains the chosen params block so
-  // we don't report it as ignored.
+  // we don't preserve it (its params { } body would re-emit verbatim and
+  // duplicate everything we already loaded).
   const hostingTopName: string | null =
     located && located.outerPath.length > 0 ? (located.outerPath[0] ?? null) : null;
   for (const node of topLevel) {
     if (node.kind === 'assignment') {
-      // Top-level assignments are outside `params { }` and not loaded.
-      out.push({
+      ignoredTopLevelAssignments.push({
         name: node.segments.join('.'),
         line: node.line,
         col: node.col,
@@ -107,20 +115,19 @@ function collectIgnoredOuterBlocks(
       continue;
     }
     if (located && located.outerPath.length === 0 && node === located.block) {
-      // The chosen top-level params block — not ignored.
-      continue;
+      continue; // The chosen top-level params block itself.
     }
     if (hostingTopName !== null && node.segments[0] === hostingTopName) {
-      // The wrapper that contains the chosen params block — not ignored.
-      continue;
+      continue; // Wrapper around the chosen params block (e.g. profiles).
     }
-    out.push({
+    preservedOuterBlocks.push({
       name: node.segments.join('.'),
       line: node.line,
       col: node.col,
+      text: source.slice(node.startOffset, node.endOffset),
     });
   }
-  return out;
+  return { preservedOuterBlocks, ignoredTopLevelAssignments };
 }
 
 function flatten(

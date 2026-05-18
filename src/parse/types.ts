@@ -28,8 +28,20 @@ export interface ParseError extends SourcePosition {
   readonly message: string;
 }
 
-export interface IgnoredOuterBlock extends SourcePosition {
+// Named braced block at file scope (process { }, profiles { }, etc.)
+// that's NOT the chosen params block or the wrapper that contains it.
+// Captured with verbatim source text so the emitter can preserve it
+// after the generated params block on round-trip.
+export interface PreservedOuterBlock extends SourcePosition {
   readonly name: string; // dotted name, e.g. "process" or "profiles.standard"
+  readonly text: string; // verbatim source slice from `name` through `}`
+}
+
+// Bare assignment at file scope (workDir = '/x', nextflow.enable.dsl = 2).
+// Reported for diagnostics but not preserved — there's no good way to
+// reason about them without evaluating their right-hand side.
+export interface IgnoredTopLevelAssignment extends SourcePosition {
+  readonly name: string; // dotted name from the LHS
 }
 
 export interface DuplicatePath {
@@ -43,7 +55,8 @@ export interface DuplicatePath {
 export interface ParseResult {
   readonly entries: readonly ParsedEntry[];
   readonly errors: readonly ParseError[];
-  readonly ignoredOuterBlocks: readonly IgnoredOuterBlock[];
+  readonly preservedOuterBlocks: readonly PreservedOuterBlock[];
+  readonly ignoredTopLevelAssignments: readonly IgnoredTopLevelAssignment[];
   readonly duplicates: readonly DuplicatePath[];
   // True when a `params { }` block was located somewhere in the file.
   // False means the file may not be a pipeline.config at all.

@@ -35,7 +35,8 @@ describe('parseConfig — basic structure', () => {
       params { x = 1 }
     `);
     expect(r.errors).toEqual([]);
-    expect(r.ignoredOuterBlocks.map((b) => b.name)).toEqual(['foo']);
+    expect(r.ignoredTopLevelAssignments.map((a) => a.name)).toEqual(['foo']);
+    expect(r.preservedOuterBlocks).toEqual([]);
     expect(entryMap(r.entries)).toEqual({ x: 1 });
   });
 });
@@ -185,9 +186,10 @@ describe('parseConfig — wrappers', () => {
     expect(r.errors).toEqual([]);
     expect(r.hadParamsBlock).toBe(true);
     expect(entryMap(r.entries)).toEqual({ fasta: '/db.fasta' });
-    // The wrapping profiles block is not reported as ignored — it
-    // contains the chosen params block.
-    expect(r.ignoredOuterBlocks).toEqual([]);
+    // The wrapping profiles block is not preserved — it contains the
+    // chosen params block, so re-emitting it verbatim would duplicate
+    // everything we already loaded.
+    expect(r.preservedOuterBlocks).toEqual([]);
   });
 
   it('prefers a top-level params block over a nested one', () => {
@@ -197,16 +199,17 @@ describe('parseConfig — wrappers', () => {
     `);
     expect(r.errors).toEqual([]);
     expect(entryMap(r.entries)).toEqual({ foo: 'top' });
-    expect(r.ignoredOuterBlocks.map((b) => b.name)).toEqual(['profiles']);
+    expect(r.preservedOuterBlocks.map((b) => b.name)).toEqual(['profiles']);
   });
 
-  it('ignores top-level non-params blocks alongside the chosen params', () => {
+  it('preserves top-level non-params blocks alongside the chosen params', () => {
     const r = parseConfig(`
       process { cpus = 4 }
       params { x = 1 }
     `);
     expect(r.errors).toEqual([]);
-    expect(r.ignoredOuterBlocks.map((b) => b.name)).toEqual(['process']);
+    expect(r.preservedOuterBlocks.map((b) => b.name)).toEqual(['process']);
+    expect(r.preservedOuterBlocks[0]?.text).toBe('process { cpus = 4 }');
     expect(entryMap(r.entries)).toEqual({ x: 1 });
   });
 });

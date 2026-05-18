@@ -4,6 +4,7 @@
 import { ModeToggle } from '../ModeToggle';
 import { AdvancedToggle } from '../form/AdvancedToggle';
 import { ValidationSummary } from '../form/ValidationSummary';
+import { PreservedBlocksNotice } from '../form/PreservedBlocksNotice';
 import { Section } from '../form/Section';
 import { sections } from '../../params/sections';
 
@@ -15,6 +16,7 @@ export function FormPane() {
         <AdvancedToggle />
       </div>
       <ValidationSummary />
+      <PreservedBlocksNotice />
       <div className="space-y-12">
         {sections.map((s) => (
           <Section key={s.id} section={s} />

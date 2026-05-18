@@ -89,12 +89,16 @@ describe('mapToState — path classification', () => {
     expect(r.state.values['aws.region']).toBeUndefined();
   });
 
-  it('reports schema-hidden entries as hidden-param', () => {
+  it('loads schema-hidden entries and reports hidden-param-preserved', () => {
     const r = mapToState([e('images.diann', 'custom/image:1.0')]);
-    const hit = findIssue(r.report.issues, 'hidden-param');
+    const hit = findIssue(r.report.issues, 'hidden-param-preserved');
     expect(hit).toBeDefined();
     expect(hit?.path).toBe('images.diann');
-    expect(r.state.values['images.diann']).toBeUndefined();
+    // The hidden param IS loaded into state so it round-trips into the
+    // generated config — power users with custom image pins shouldn't
+    // lose them on download.
+    expect(r.state.values['images.diann']).toBe('custom/image:1.0');
+    expect(r.state.touched['images.diann']).toBe(true);
   });
 
   it('reports paths not in schema as unknown-param', () => {
@@ -104,6 +108,24 @@ describe('mapToState — path classification', () => {
     expect(hit?.path).toBe('not.a.real.path');
     expect(hit?.rawValue).toBe('whatever');
     expect(r.state.values['not.a.real.path']).toBeUndefined();
+  });
+
+  it('loads glob/regex paths exposed only via a virtual parent (no direct ParamMeta)', () => {
+    // quant_spectra_glob, chromatogram_library_spectra_glob, and the carafe
+    // glob/regex pair are reachable through the glob-regex-pair widgets'
+    // `affects` lists, not as their own ParamMeta entries. Without the
+    // virtual-parent fallback in classify(), upload would flag these as
+    // unknown-param and silently drop user-set glob values.
+    const r = mapToState([
+      e('quant_spectra_glob', '*.mzML'),
+      e('chromatogram_library_spectra_glob', '*.raw'),
+      e('carafe.spectra_glob', '*.d.zip'),
+    ]);
+    expect(r.report.issues).toEqual([]);
+    expect(r.state.values['quant_spectra_glob']).toBe('*.mzML');
+    expect(r.state.values['chromatogram_library_spectra_glob']).toBe('*.raw');
+    expect(r.state.values['carafe.spectra_glob']).toBe('*.d.zip');
+    expect(r.state.touched['quant_spectra_glob']).toBe(true);
   });
 });
 
@@ -294,6 +316,28 @@ describe('mapToState — carafe inference', () => {
     expect(hit?.sourceInferred).toBe('dir');
     // The explicit value wins in state.
     expect(r.state.values['carafe.source']).toBe('file');
+  });
+});
+
+describe('mapToState — preserved outer blocks', () => {
+  it('leaves state.preservedOuterText absent when no outer blocks were passed', () => {
+    const r = mapToState([e('fasta', '/db.fasta')]);
+    expect(r.state.preservedOuterText).toBeUndefined();
+    expect(r.report.preservedOuterBlockNames).toEqual([]);
+  });
+
+  it('concatenates outer-block text in the order received', () => {
+    const r = mapToState(
+      [e('fasta', '/db.fasta')],
+      [
+        { name: 'process', text: 'process { cpus = 4 }', line: 1, col: 1 },
+        { name: 'docker', text: 'docker { enabled = true }', line: 3, col: 1 },
+      ],
+    );
+    expect(r.state.preservedOuterText).toBe(
+      'process { cpus = 4 }\n\ndocker { enabled = true }',
+    );
+    expect(r.report.preservedOuterBlockNames).toEqual(['process', 'docker']);
   });
 });
 

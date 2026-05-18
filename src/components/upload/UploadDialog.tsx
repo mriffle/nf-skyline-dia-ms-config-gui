@@ -34,12 +34,17 @@ export function UploadDialog({
   }, [onCancel]);
 
   const discarded = report.issues.filter(isDiscardIssue);
-  const advisory = report.issues.filter((i) => !isDiscardIssue(i));
+  const preservedParams = report.issues.filter(isPreservedParamIssue);
+  const advisory = report.issues.filter(
+    (i) => !isDiscardIssue(i) && !isPreservedParamIssue(i),
+  );
   const totalNotices =
     discarded.length +
     advisory.length +
+    preservedParams.length +
     parsed.duplicates.length +
-    parsed.ignoredOuterBlocks.length;
+    parsed.preservedOuterBlocks.length +
+    parsed.ignoredTopLevelAssignments.length;
 
   const modeLabel = report.detectedMode === 'pdc' ? 'PDC' : 'General';
   const carafeLabel = report.inferredCarafeEnabled
@@ -125,15 +130,37 @@ export function UploadDialog({
                   )}
                 />
               ) : null}
-              {parsed.ignoredOuterBlocks.length > 0 ? (
+              {preservedParams.length > 0 ? (
+                <IssueGroup
+                  tone="info"
+                  title={`${preservedParams.length} hidden parameter${
+                    preservedParams.length === 1 ? '' : 's'
+                  } preserved`}
+                  description="These params aren't surfaced in the form (typically infrastructure or pinned image versions), but will be loaded and re-emitted into the generated config."
+                  items={preservedParams.map(formatIssue)}
+                />
+              ) : null}
+              {parsed.preservedOuterBlocks.length > 0 ? (
+                <IssueGroup
+                  tone="info"
+                  title={`${parsed.preservedOuterBlocks.length} block${
+                    parsed.preservedOuterBlocks.length === 1 ? '' : 's'
+                  } preserved verbatim`}
+                  description="These blocks live outside params { } and will be appended to the generated config unchanged."
+                  items={parsed.preservedOuterBlocks.map(
+                    (b) => `${b.name} (line ${b.line})`,
+                  )}
+                />
+              ) : null}
+              {parsed.ignoredTopLevelAssignments.length > 0 ? (
                 <IssueGroup
                   tone="warning"
-                  title={`${parsed.ignoredOuterBlocks.length} block${
-                    parsed.ignoredOuterBlocks.length === 1 ? '' : 's'
-                  } outside params { } ignored`}
-                  description="Only assignments inside params { } are loaded."
-                  items={parsed.ignoredOuterBlocks.map(
-                    (b) => `${b.name} (line ${b.line})`,
+                  title={`${parsed.ignoredTopLevelAssignments.length} top-level assignment${
+                    parsed.ignoredTopLevelAssignments.length === 1 ? '' : 's'
+                  } ignored`}
+                  description="Bare assignments outside any block are not loaded."
+                  items={parsed.ignoredTopLevelAssignments.map(
+                    (a) => `${a.name} (line ${a.line})`,
                   )}
                 />
               ) : null}
@@ -169,17 +196,21 @@ export function UploadDialog({
 }
 
 interface IssueGroupProps {
-  readonly tone: 'error' | 'warning';
+  readonly tone: 'error' | 'warning' | 'info';
   readonly title: string;
   readonly description: string;
   readonly items: readonly string[];
 }
 
 function IssueGroup({ tone, title, description, items }: IssueGroupProps) {
-  const headerColor = tone === 'error' ? 'text-red-700' : 'text-amber-800';
-  const bodyColor = tone === 'error' ? 'text-red-800' : 'text-amber-900';
-  const border = tone === 'error' ? 'border-red-200' : 'border-amber-200';
-  const bg = tone === 'error' ? 'bg-red-50/60' : 'bg-amber-50/60';
+  const headerColor =
+    tone === 'error' ? 'text-red-700' : tone === 'warning' ? 'text-amber-800' : 'text-sky-800';
+  const bodyColor =
+    tone === 'error' ? 'text-red-800' : tone === 'warning' ? 'text-amber-900' : 'text-sky-900';
+  const border =
+    tone === 'error' ? 'border-red-200' : tone === 'warning' ? 'border-amber-200' : 'border-sky-200';
+  const bg =
+    tone === 'error' ? 'bg-red-50/60' : tone === 'warning' ? 'bg-amber-50/60' : 'bg-sky-50/60';
   return (
     <details
       className={`rounded-md border ${border} ${bg} px-3 py-2`}
@@ -203,11 +234,11 @@ function IssueGroup({ tone, title, description, items }: IssueGroupProps) {
 function isDiscardIssue(issue: UploadIssue): boolean {
   switch (issue.kind) {
     case 'unknown-param':
-    case 'hidden-param':
     case 'ignored-param':
     case 'type-mismatch':
     case 'enum-mismatch':
       return true;
+    case 'hidden-param-preserved':
     case 'range-violation':
     case 'string-coerced-to-list':
     case 'list-truncated-to-string':
@@ -217,12 +248,16 @@ function isDiscardIssue(issue: UploadIssue): boolean {
   }
 }
 
+function isPreservedParamIssue(issue: UploadIssue): boolean {
+  return issue.kind === 'hidden-param-preserved';
+}
+
 function formatIssue(issue: UploadIssue): string {
   switch (issue.kind) {
     case 'unknown-param':
       return `${issue.path} — unknown parameter (not in schema; possibly removed, renamed, or typo'd)`;
-    case 'hidden-param':
-      return `${issue.path} — hidden parameter (not surfaced in UI)`;
+    case 'hidden-param-preserved':
+      return `${issue.path} — loaded verbatim (no UI control; value will re-emit)`;
     case 'ignored-param':
       return `${issue.path} — ignored (infrastructure or deprecated)`;
     case 'type-mismatch':
