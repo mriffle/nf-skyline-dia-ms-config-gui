@@ -44,7 +44,7 @@ export function AppShell() {
               nf-skyline-dia-ms config builder
             </h1>
             <p className="text-[12px] text-slate-500">
-              Generate a Nextflow override config interactively.
+              Generate a Nextflow config file interactively.
             </p>
           </div>
           <div className="flex items-center gap-2">

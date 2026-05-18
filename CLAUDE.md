@@ -908,6 +908,17 @@ should match what you intended to change).
 ## Deployment
 
 - GitHub Pages, served by `.github/workflows/deploy.yml`.
+- **Trigger**: a published GitHub Release (or manual `workflow_dispatch`).
+  Pushes to `main` do NOT deploy — version is meant to be bumped
+  deliberately by cutting a release.
+- **Version source**: the release tag name (e.g. `v1.2.3`) is passed to
+  the build via the `APP_VERSION` env var. `vite.config.ts` strips the
+  leading `v` and injects the result as `__APP_VERSION__`, which surfaces
+  in the footer (`v1.2.3`) and the emit header comment. For local builds
+  and `npm run dev` (no `APP_VERSION` set) the version falls back to the
+  sentinel `0.0.1-dev` so a non-release bundle is visually obvious.
+  `package.json`'s `version` field is no longer load-bearing — it can
+  stay at any value without affecting deployment.
 - Build runs `typecheck`, `test`, then `build`. All three must pass for
   the deploy step to run.
 - **One-time manual setup**: in the repo's GitHub settings, set
