@@ -170,6 +170,16 @@ correctly after touching wizard/flow.ts or any screen file.
   `carafe.cli_options` (predicate on `carafeEnabled`), and
   `skyline.group_proteins` / `skyline.group_by_gene` /
   `skyline.protein_parsimony` (predicate on `skylineNotSkipped`).
+- **`surfaceHidden` opt-in on `ParamMeta`**: deliberate exception to the
+  "hidden schema params don't appear in the UI" rule. Set on a ParamMeta
+  whose `path` binds to a schema entry marked `hidden: true` (the coverage
+  test would otherwise reject the binding). Currently used by `images.diann`
+  — users routinely override the DIA-NN container to a self-built image of
+  a newer DIA-NN release because DIA-NN's strict license prevents
+  redistribution of versions after 1.8.1 on registries like Docker Hub.
+  The upload classifier prefers a `surfaceHidden` ParamMeta over the
+  `hidden-preserved` fallback, so uploaded values populate the form field
+  instead of landing in the preserved sub-block.
 
 ### 2. Mode toggle (General / PDC)
 
@@ -516,13 +526,15 @@ text → parseConfig (lex + parse + locate params { } + flatten)
 **Path classification** (in `mapToState.classify`):
 1. `IGNORED_PARAM_PATHS` membership → `ignored-param` (discarded).
 2. Not in `schemaDerived` → `unknown-param` (discarded).
-3. Schema entry has `hidden: true` → `hidden-preserved`: loaded into
+3. Has direct `ParamMeta` with `surfaceHidden: true` → coerce normally
+   (deliberate surface of a hidden schema path, e.g. `images.diann`).
+4. Schema entry has `hidden: true` → `hidden-preserved`: loaded into
    state.values + touched, reported as `hidden-param-preserved`
    (informational, sky-blue in dialog). The emitter routes them to the
    "preserved" sub-block inside `params { }` since there's no
    `ParamMeta` driving section assignment.
-4. Has direct `ParamMeta` → coerce normally.
-5. Has no direct `ParamMeta` but is the target of some virtual entry's
+5. Has direct `ParamMeta` → coerce normally.
+6. Has no direct `ParamMeta` but is the target of some virtual entry's
    `affects` list (`quant_spectra_glob`, `chromatogram_library_spectra_glob`,
    `carafe.spectra_glob` / `carafe.spectra_regex`) → look up the
    parent virtual via `VIRTUAL_PARENT_BY_AFFECTED_PATH` and coerce
@@ -774,8 +786,10 @@ selected (because predict is the absence of the other two flags).
 2. **The schema is the type authority; `paramMetadata.ts` is the UX
    authority.** Type/default/enum facts always come from
    `schemaDerived.generated.ts`.
-3. **Hidden schema params must not appear in the UI.** The codegen sets
-   `hidden: true` from the schema; the coverage test enforces this.
+3. **Hidden schema params must not appear in the UI** — except when a
+   `ParamMeta` opts in via `surfaceHidden: true` (see §1; currently
+   `images.diann`). The codegen sets `hidden: true` from the schema; the
+   coverage test enforces this with the surfaceHidden caveat.
    `IGNORED_PARAM_PATHS` is the explicit allow-list for params that exist
    in the schema but are intentionally not surfaced (e.g. `aws.batch.*`).
 4. **No external component libraries.** Tailwind primitives only — no

@@ -44,7 +44,7 @@ describe('paramMetadata coverage', () => {
     expect(missing, `missing UX coverage for: ${missing.join(', ')}`).toEqual([]);
   });
 
-  test('no paramMetadata.path references a missing or hidden schema path (unless virtual)', () => {
+  test('no paramMetadata.path references a missing or hidden schema path (unless virtual or surfaceHidden)', () => {
     const offenders: string[] = [];
     for (const meta of paramMetadata) {
       if (meta.virtual === true) continue;
@@ -53,7 +53,7 @@ describe('paramMetadata coverage', () => {
         offenders.push(`${meta.path} (not in schema)`);
         continue;
       }
-      if (entry.hidden) {
+      if (entry.hidden && meta.surfaceHidden !== true) {
         offenders.push(`${meta.path} (hidden in schema)`);
       }
     }

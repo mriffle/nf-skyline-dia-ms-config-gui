@@ -123,6 +123,7 @@ export function SearchEngineScreen() {
           },
         ]}
       />
+      <Field path="images.diann" />
       <WizardAdvancedSection>
         <p className="text-[12px] text-slate-500">
           Engine-specific parameters appear when their engine is selected.

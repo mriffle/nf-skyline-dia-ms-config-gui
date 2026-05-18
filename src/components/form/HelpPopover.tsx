@@ -1,8 +1,34 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 
 interface HelpPopoverProps {
   readonly content: string;
   readonly label: string;
+}
+
+// Match bare http(s) URLs. Strips trailing punctuation that's almost
+// always sentence-grammar, not part of the URL.
+const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+
+function renderHelpContent(text: string): ReactNode {
+  const parts = text.split(URL_RE);
+  return parts.map((part, i) => {
+    if (i % 2 === 0) return <Fragment key={i}>{part}</Fragment>;
+    const trimmed = part.replace(/[.,;:!?)\]]+$/, '');
+    const trailing = part.slice(trimmed.length);
+    return (
+      <Fragment key={i}>
+        <a
+          href={trimmed}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-accent-600 underline hover:text-accent-700"
+        >
+          {trimmed}
+        </a>
+        {trailing}
+      </Fragment>
+    );
+  });
 }
 
 export function HelpPopover({ content, label }: HelpPopoverProps) {
@@ -51,7 +77,7 @@ export function HelpPopover({ content, label }: HelpPopoverProps) {
             'text-[13px] leading-relaxed text-slate-700',
           ].join(' ')}
         >
-          {content}
+          {renderHelpContent(content)}
         </div>
       ) : null}
     </div>

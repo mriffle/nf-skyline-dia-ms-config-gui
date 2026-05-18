@@ -80,6 +80,15 @@ export interface ParamMeta {
   // When the predicate returns false, the param falls back to the normal
   // emit-only-touched rule.
   readonly alwaysEmit?: boolean | ((s: FormState) => boolean);
+  // Opt-in to bind a ParamMeta entry to a schema path marked hidden: true.
+  // The hard rule is that hidden schema params don't appear in the UI; set
+  // this when a specific hidden param is deliberately surfaced (e.g.
+  // `images.diann` — users routinely override the DIA-NN container to a
+  // newer self-built image because of DIA-NN's strict licensing on
+  // distributed binaries). Loosens the coverage test and routes upload
+  // through the regular ok-classify path so the value populates the form
+  // instead of landing in the preserved sub-block.
+  readonly surfaceHidden?: boolean;
 }
 
 // Infra knobs power users override in their own profile config, plus the
@@ -319,6 +328,17 @@ export const paramMetadata: readonly ParamMeta[] = [
     // common starting point and is required for PDC mode.
     defaultOverride: 'diann',
     alwaysEmit: true,
+  },
+  {
+    path: 'images.diann',
+    section: 'search',
+    label: 'DIA-NN Docker image',
+    help: 'Override the Docker image used to run DIA-NN. The workflow ships with DIA-NN 1.8.1 — the last version released under a permissive license that allows redistribution on Docker Hub. Newer versions are free to download from the DIA-NN authors but must be built into a Docker image yourself. Build instructions: https://nf-carafe-ai-ms.readthedocs.io/en/latest/custom_diann.html',
+    tier: 'common',
+    widget: 'text',
+    visibleWhen: searchEngineIs('diann', 'DiaNN'),
+    surfaceHidden: true,
+    group: 'DIA-NN',
   },
   {
     path: 'diann.search_params',

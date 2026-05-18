@@ -90,14 +90,24 @@ describe('mapToState — path classification', () => {
   });
 
   it('loads schema-hidden entries and reports hidden-param-preserved', () => {
-    const r = mapToState([e('images.diann', 'custom/image:1.0')]);
+    const r = mapToState([e('images.proteowizard', 'custom/pwiz:1.0')]);
     const hit = findIssue(r.report.issues, 'hidden-param-preserved');
     expect(hit).toBeDefined();
-    expect(hit?.path).toBe('images.diann');
+    expect(hit?.path).toBe('images.proteowizard');
     // The hidden param IS loaded into state so it round-trips into the
     // generated config — power users with custom image pins shouldn't
     // lose them on download.
-    expect(r.state.values['images.diann']).toBe('custom/image:1.0');
+    expect(r.state.values['images.proteowizard']).toBe('custom/pwiz:1.0');
+    expect(r.state.touched['images.proteowizard']).toBe(true);
+  });
+
+  it('loads surfaceHidden ParamMeta entries through the regular UI path', () => {
+    // images.diann is hidden in the schema but ParamMeta opts in via
+    // surfaceHidden so the value populates the form field and is NOT
+    // flagged as hidden-preserved.
+    const r = mapToState([e('images.diann', 'quay.io/user/diann:2.0')]);
+    expect(issueKinds(r.report.issues)).not.toContain('hidden-param-preserved');
+    expect(r.state.values['images.diann']).toBe('quay.io/user/diann:2.0');
     expect(r.state.touched['images.diann']).toBe(true);
   });
 

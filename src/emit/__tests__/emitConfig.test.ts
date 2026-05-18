@@ -291,24 +291,27 @@ describe('emitConfig — hidden / unmodeled preserved params', () => {
   // fallback (typically hidden infra params like images.*) emit at the
   // end of params { } under a "Preserved from uploaded config" banner.
   it('renders images.* under the preserved sub-block at the end of params', () => {
+    // images.proteowizard and images.encyclopedia remain hidden-only in the
+    // UX overlay, so they exercise the preserved sub-block path. (images.diann
+    // is now a surfaced ParamMeta entry and would route to the search section.)
     const state: FormState = {
       mode: 'general',
       values: {
         fasta: '/db.fasta',
-        'images.diann': 'quay.io/user/diann:custom',
         'images.proteowizard': 'quay.io/user/pwiz:custom',
+        'images.encyclopedia': 'quay.io/user/encyclopedia:custom',
       },
       touched: {
         fasta: true,
-        'images.diann': true,
         'images.proteowizard': true,
+        'images.encyclopedia': true,
       },
     };
     const out = emit(state);
     expect(out).toContain("fasta = '/db.fasta'");
     expect(out).toContain('Preserved from uploaded config');
-    expect(out).toContain("diann = 'quay.io/user/diann:custom'");
     expect(out).toContain("proteowizard = 'quay.io/user/pwiz:custom'");
+    expect(out).toContain("encyclopedia = 'quay.io/user/encyclopedia:custom'");
     // Should namespace-collapse into an images { } block.
     expect(out).toContain('images {');
     // Preserved sub-block must come after the regular sections.

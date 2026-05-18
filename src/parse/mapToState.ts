@@ -138,8 +138,12 @@ function classify(path: string): Classification {
   if (IGNORED_PARAM_PATHS.has(path)) return { kind: 'ignored' };
   const schema = schemaDerived[path];
   if (!schema) return { kind: 'unknown' };
-  if (schema.hidden) return { kind: 'hidden-preserved', schema };
   const meta = paramMetadataByPath[path];
+  // Hidden schema params with a deliberate surfaceHidden ParamMeta load
+  // through the regular UI path so uploads populate the form field
+  // instead of landing in the preserved sub-block.
+  if (meta && meta.surfaceHidden === true) return { kind: 'ok', schema, meta };
+  if (schema.hidden) return { kind: 'hidden-preserved', schema };
   if (meta) return { kind: 'ok', schema, meta };
   const parentVirtual = VIRTUAL_PARENT_BY_AFFECTED_PATH.get(path);
   if (parentVirtual) return { kind: 'ok', schema, meta: parentVirtual };
