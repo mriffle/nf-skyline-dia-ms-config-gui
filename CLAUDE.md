@@ -257,6 +257,15 @@ uploaded config — see §9) is appended after the closing `}` of
 what's modelled in metadata": it's user-provided source carried through
 without re-parsing.
 
+Touched paths with no `ParamMeta` AND no `VIRTUAL_PARENT_BY_AFFECTED_PATH`
+fallback — typically hidden / infrastructure params like `images.diann`
+loaded verbatim from an upload — emit into a synthetic "Preserved from
+uploaded config" sub-block at the end of `params { }`, namespace-collapsed
+the same way real sections are (so `images.diann` + `images.proteowizard`
+render as one `images { … }` block). They share `state.values` /
+`state.touched` with regular paths; only the routing in `groupBySection`
+distinguishes them.
+
 ### 5. Validation
 
 Two layers, both running on every state change:
@@ -282,7 +291,14 @@ correctness boundary in the app. Order of operations:
    to its concrete shape.
 3. Skip *virtual* entries that don't write a real path.
 4. **Group entries by UI section** (in `sections.ts` order). Sections with
-   no emitted entries are dropped.
+   no emitted entries are dropped. Each entry's section comes from either
+   its direct `paramMetadata` entry OR its parent virtual entry in
+   `VIRTUAL_PARENT_BY_AFFECTED_PATH` (e.g. `quant_spectra_glob`
+   inherits the `input-general` section from its `glob-regex-pair`
+   parent). Anything that lands in neither bucket goes into a synthetic
+   "preserved" group emitted at the end of `params { }` under a
+   `// === Preserved from uploaded config ===` banner — typically
+   uploaded hidden / infra params with no UI control (see §9).
 5. Within each section, build a namespace tree and emit:
    - **block form** (`pdc { ... }`) when a namespace has ≥2 emitted
      children at the same level, otherwise dotted form (`pdc.study_id = 'X'`).
@@ -472,10 +488,15 @@ text → parseConfig (lex + parse + locate params { } + flatten)
   Rejects GString interpolation (`${...}`) — there's no way to
   evaluate it statically.
 - `groovyParser.ts` — recursive-descent parser into a small AST of
-  `block` and `assignment` nodes. Error recovery: every parse failure
-  pushes a `ParseError` and resyncs at the next IDENT / RBRACE / EOF.
-  Distinguishes list literals (`[1,2,3]`) from map literals
-  (`['k':'v']`) by lookahead on `KEY ':' `.
+  `block`, `assignment`, and `directive` nodes. Error recovery: every
+  parse failure pushes a `ParseError` and resyncs at the next IDENT /
+  RBRACE / EOF. Distinguishes list literals (`[1,2,3]`) from map
+  literals (`['k':'v']`) by lookahead on `KEY ':' `. `directive` is
+  the Nextflow method-call form (`includeConfig 'path'`) — whitelisted
+  by name in `FILE_SCOPE_DIRECTIVES` so typos like `fasta '/db'` still
+  error loudly. To add a new directive, append its bare identifier to
+  that set; the parser will then capture it with start/end offsets
+  identical to a block.
 - `parseConfig.ts` — orchestrator. Locates the first `params { }` block
   via two-pass search (prefer top-level over nested wrappers like
   `profiles { standard { params { } } }`). Supports the
@@ -483,26 +504,42 @@ text → parseConfig (lex + parse + locate params { } + flatten)
   prefix). Flattens block + dotted forms into a single `(path, value)`
   entry list. Deduplicates with last-wins. Outer scope is split into two
   buckets: `preservedOuterBlocks` (named braced blocks like `process { }`
-  / `profiles { }`, captured verbatim as a source slice via the
-  start/end offsets attached to `AstBlock`) and
-  `ignoredTopLevelAssignments` (bare `foo = 'x'` at file scope, still
-  discarded — there's no good way to round-trip them without evaluating
-  the RHS).
+  / `profiles { }` AND whitelisted method-call directives like
+  `includeConfig 'path'`, captured verbatim as source slices via the
+  start/end offsets the parser attaches to `AstBlock` / `AstDirective`)
+  and `ignoredTopLevelAssignments` (bare `foo = 'x'` at file scope,
+  still discarded — there's no good way to round-trip them without
+  evaluating the RHS).
 - `mapToState.ts` — entries → `FormState` + `UploadReport`. The most
   judgment-heavy module; see decisions below.
 
 **Path classification** (in `mapToState.classify`):
-1. `IGNORED_PARAM_PATHS` membership → `ignored-param`.
-2. Schema entry has `hidden: true` → `hidden-param`.
-3. Not in `schemaDerived` (and not a recognized UI virtual) →
-   `unknown-param`.
-4. Has both schema + paramMetadata → coerce normally.
+1. `IGNORED_PARAM_PATHS` membership → `ignored-param` (discarded).
+2. Not in `schemaDerived` → `unknown-param` (discarded).
+3. Schema entry has `hidden: true` → `hidden-preserved`: loaded into
+   state.values + touched, reported as `hidden-param-preserved`
+   (informational, sky-blue in dialog). The emitter routes them to the
+   "preserved" sub-block inside `params { }` since there's no
+   `ParamMeta` driving section assignment.
+4. Has direct `ParamMeta` → coerce normally.
+5. Has no direct `ParamMeta` but is the target of some virtual entry's
+   `affects` list (`quant_spectra_glob`, `chromatogram_library_spectra_glob`,
+   `carafe.spectra_glob` / `carafe.spectra_regex`) → look up the
+   parent virtual via `VIRTUAL_PARENT_BY_AFFECTED_PATH` and coerce
+   using that meta. Without this fallback, upload would flag these
+   as `unknown-param` and the form's glob-regex-pair widgets would
+   silently lose user-set values on round-trip.
 
 **Recognized UI virtuals** (`use_carafe`, `carafe.source`) are pulled
 out of the entry stream up front so they're not flagged as unknown —
 they feed the carafe inference instead. Other virtual paths in
 `paramMetadata` (e.g. `quant_spectra_files`) shouldn't appear in real
 files; if they do, they're flagged as unknown.
+
+The same `VIRTUAL_PARENT_BY_AFFECTED_PATH` map is built independently
+in `mapToState.ts` and `emit/emitConfig.ts` — kept duplicated rather
+than extracted to avoid coupling the parse and emit pipelines. If you
+change `affects` semantics, update both.
 
 **Value coercion** is shape-driven against `schemaDerived[path].shape`:
 - `boolean`, `integer`, `number`, `string`, `enum`: strict; mismatches
@@ -540,21 +577,26 @@ between explicit `carafe.source` and the inferred value is reported as
 file. This includes `alwaysEmit`-eligible paths if they appear.
 
 **`UploadReport` issue kinds**:
-- *Discarded* (red in the dialog): `unknown-param`, `hidden-param`,
-  `ignored-param`, `type-mismatch`, `enum-mismatch`.
+- *Discarded* (red in the dialog): `unknown-param`, `ignored-param`,
+  `type-mismatch`, `enum-mismatch`.
+- *Preserved* (sky-blue info): `hidden-param-preserved` — loaded into
+  state and re-emitted into the params { } "preserved" sub-block.
 - *Loaded with notes* (amber): `range-violation`,
   `string-coerced-to-list`, `list-truncated-to-string`,
   `mode-ambiguity`, `carafe-source-mismatch`.
 - Plus parse-time `duplicates` (amber), `preservedOuterBlocks` (info /
-  sky-blue), and `ignoredTopLevelAssignments` (amber) rendered
+  sky-blue — covers both braced blocks AND directives like
+  `includeConfig`), and `ignoredTopLevelAssignments` (amber) rendered
   separately.
 
-**Outer-block preservation** — named braced blocks alongside `params { }`
-(`process { }`, `profiles { }`, `docker { }`, etc.) survive a round-trip
-verbatim:
+**Outer-scope preservation** — both named braced blocks alongside
+`params { }` (`process { }`, `profiles { }`, `docker { }`, etc.) AND
+whitelisted method-call directives like `includeConfig 'path'` survive
+a round-trip verbatim:
 1. `parseConfig` slices their source text via the start/end offsets the
-   parser captures on `AstBlock` and exposes them as
-   `preservedOuterBlocks` on `ParseResult`.
+   parser captures on `AstBlock` / `AstDirective` and exposes them as
+   `preservedOuterBlocks` on `ParseResult` (one bucket — directives are
+   stored alongside blocks since they ride the same pipeline).
 2. `mapToState(entries, preservedOuterBlocks)` concatenates the slices
    with one blank line between them and writes them to
    `state.preservedOuterText` (optional field on `FormState`,
@@ -565,10 +607,25 @@ verbatim:
    — the captured text is not re-formatted or re-validated.
 4. The form pane shows `PreservedBlocksNotice` (sky-blue, with a
    collapsible "Show content" pre) above the section list while
-   `preservedOuterText` is non-empty.
+   `preservedOuterText` is non-empty. The same component also lists any
+   hidden-preserved param paths in state — see "Hidden-param
+   preservation" below.
 5. `reset` clears the field; `loadFromConfig` replaces it; the wrapping
    `profiles { }` around a chosen nested `params { }` is *not*
    preserved (re-emitting it would duplicate everything in `params`).
+
+**Hidden-param preservation** — schema-`hidden` params (e.g. `images.*`
+container pinnings, `output_directories`) are loaded verbatim instead
+of discarded so power-user customizations round-trip:
+1. `classify` returns `hidden-preserved` (see classification list above).
+2. Value goes into `state.values` and `state.touched` like any other
+   path. The form doesn't render them — there's no `ParamMeta`.
+3. `emit` routes them to a synthetic "Preserved from uploaded config"
+   sub-block at the end of `params { }` (since they have no section
+   assignment), with namespace collapse (`images.diann` +
+   `images.proteowizard` → one `images { ... }` block).
+4. `PreservedBlocksNotice` enumerates them as code-styled chips.
+5. `reset` clears them along with all other state.values.
 
 **Store integration**: a `loadFromConfig(loaded)` action atomically
 replaces `mode`, `values`, `touched`, `preservedOuterText`. Loaded
@@ -594,8 +651,10 @@ doesn't carry the field.
   found or the parse couldn't produce any entries.
 - `src/components/form/PreservedBlocksNotice.tsx` — informational
   banner shown in the form pane (between `ValidationSummary` and the
-  section list) when `state.preservedOuterText` is non-empty. Shows
-  block names and a collapsible verbatim view.
+  section list). Renders when `state.preservedOuterText` is non-empty
+  OR when any touched path in state is schema-hidden. Shows a
+  collapsible "Show outer-scope content" pre for the verbatim text and
+  enumerates hidden-preserved param paths as code chips.
 
 **Round-trip stability** — two properties verified by
 `src/parse/__tests__/roundtrip.test.ts`:
