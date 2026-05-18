@@ -114,6 +114,18 @@ function collectOuterScope(
       });
       continue;
     }
+    if (node.kind === 'directive') {
+      // includeConfig (and any future file-scope method-call directives)
+      // round-trip verbatim through the same preservation pipeline as
+      // outer blocks.
+      preservedOuterBlocks.push({
+        name: node.name,
+        line: node.line,
+        col: node.col,
+        text: source.slice(node.startOffset, node.endOffset),
+      });
+      continue;
+    }
     if (located && located.outerPath.length === 0 && node === located.block) {
       continue; // The chosen top-level params block itself.
     }
@@ -136,6 +148,12 @@ function flatten(
   out: ParsedEntry[],
 ): void {
   for (const node of nodes) {
+    if (node.kind === 'directive') {
+      // Directives don't contribute to params entries. They're handled
+      // at file scope by collectOuterScope; appearing inside params
+      // would be unusual but we silently skip rather than throw.
+      continue;
+    }
     if (node.kind === 'assignment') {
       const path = [...prefix, ...node.segments].join('.');
       out.push({

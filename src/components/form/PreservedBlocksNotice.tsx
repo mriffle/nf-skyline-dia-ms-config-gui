@@ -1,7 +1,7 @@
 // Informational banner shown above the form when the current state
 // carries content that the user uploaded but the form doesn't surface:
-// (a) verbatim outer blocks like process { } / profiles { } appended
-//     after params { }, and / or
+// (a) verbatim outer-scope content (process { } / profiles { } blocks,
+//     includeConfig directives) appended after params { }, and / or
 // (b) hidden / infrastructure params (e.g. images.*) loaded into
 //     state.values and re-emitted into params { } verbatim but without
 //     a UI control.
@@ -26,8 +26,6 @@ export function PreservedBlocksNotice() {
     return null;
   }
 
-  const blockNames = hasOuterText ? collectBlockNames(preservedOuterText) : [];
-
   return (
     <div className="mb-6 rounded-md border border-sky-200 bg-sky-50/70 px-3 py-2">
       <p className="text-sm font-semibold text-sky-800">
@@ -35,24 +33,14 @@ export function PreservedBlocksNotice() {
       </p>
       {hasOuterText ? (
         <p className="mt-1 text-[13px] text-sky-900">
-          {blockNames.length > 0 ? (
-            <>
-              Outer block{blockNames.length === 1 ? '' : 's'}{' '}
-              {blockNames.map((n, i) => (
-                <span key={n}>
-                  <code className="rounded bg-sky-100 px-1 font-mono text-[12px]">{n}</code>
-                  {i < blockNames.length - 1 ? ', ' : ''}
-                </span>
-              ))}{' '}
-              will be appended to the generated config verbatim.
-            </>
-          ) : (
-            <>Content from the uploaded config will be appended to the generated config verbatim.</>
-          )}
+          Outer-scope content (e.g. <code className="rounded bg-sky-100 px-1 font-mono text-[12px]">process</code>{' '}
+          / <code className="rounded bg-sky-100 px-1 font-mono text-[12px]">profiles</code> blocks,{' '}
+          <code className="rounded bg-sky-100 px-1 font-mono text-[12px]">includeConfig</code> directives) will be
+          appended to the generated config verbatim.
         </p>
       ) : null}
       {preservedHiddenPaths.length > 0 ? (
-        <p className={`${hasOuterText ? 'mt-1' : 'mt-1'} text-[13px] text-sky-900`}>
+        <p className="mt-1 text-[13px] text-sky-900">
           Hidden parameter{preservedHiddenPaths.length === 1 ? '' : 's'}{' '}
           {preservedHiddenPaths.map((n, i) => (
             <span key={n}>
@@ -76,7 +64,7 @@ export function PreservedBlocksNotice() {
             ].join(' ')}
             aria-expanded={expanded}
           >
-            {expanded ? 'Hide outer-block content' : 'Show outer-block content'}
+            {expanded ? 'Hide outer-scope content' : 'Show outer-scope content'}
           </button>
           {expanded ? (
             <pre className="mt-2 max-h-72 overflow-auto rounded border border-sky-200 bg-white p-2 text-[12px] leading-snug text-slate-800">
@@ -105,30 +93,4 @@ function collectPreservedHiddenPaths(
     out.push(path);
   }
   return out.sort();
-}
-
-// Pull the leading identifier off each top-level block in the preserved
-// text so we can show a short summary. Best-effort — anything we can't
-// classify is silently skipped.
-function collectBlockNames(text: string): string[] {
-  const names: string[] = [];
-  const re = /(^|\n)\s*([A-Za-z_$][A-Za-z0-9_$.]*)\s*\{/g;
-  let depth = 0;
-  let lastIndex = 0;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '{') {
-      if (depth === 0) {
-        const slice = text.slice(lastIndex, i + 1);
-        re.lastIndex = 0;
-        const m = re.exec(slice);
-        if (m && m[2]) names.push(m[2]);
-      }
-      depth++;
-    } else if (ch === '}') {
-      depth = Math.max(0, depth - 1);
-      if (depth === 0) lastIndex = i + 1;
-    }
-  }
-  return names;
 }

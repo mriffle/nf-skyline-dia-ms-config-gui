@@ -212,6 +212,26 @@ describe('parseConfig — wrappers', () => {
     expect(r.preservedOuterBlocks[0]?.text).toBe('process { cpus = 4 }');
     expect(entryMap(r.entries)).toEqual({ x: 1 });
   });
+
+  it('preserves a top-level includeConfig directive', () => {
+    const r = parseConfig(
+      `params { x = 1 }\nincludeConfig '/net/maccoss/includes/nextflow-dia.include'\n`,
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.preservedOuterBlocks.map((b) => b.name)).toEqual(['includeConfig']);
+    expect(r.preservedOuterBlocks[0]?.text).toBe(
+      "includeConfig '/net/maccoss/includes/nextflow-dia.include'",
+    );
+    expect(entryMap(r.entries)).toEqual({ x: 1 });
+  });
+
+  it('still errors on a plain `name "string"` typo (only includeConfig is whitelisted)', () => {
+    const r = parseConfig(
+      `params { good = 1 }\nfasta '/looks-like-a-typo'\n`,
+    );
+    expect(r.errors.length).toBeGreaterThan(0);
+    expect(r.preservedOuterBlocks).toEqual([]);
+  });
 });
 
 describe('parseConfig — duplicates and recovery', () => {

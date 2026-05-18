@@ -10,7 +10,7 @@
 import type { ParsedValue, ParseError } from './types';
 import type { Token } from './groovyLexer';
 
-export type AstNode = AstAssignment | AstBlock;
+export type AstNode = AstAssignment | AstBlock | AstDirective;
 
 export interface AstAssignment {
   readonly kind: 'assignment';
@@ -33,6 +33,25 @@ export interface AstBlock {
   readonly startOffset: number;
   readonly endOffset: number;
 }
+
+// Nextflow method-call directive at file scope, e.g.
+// `includeConfig '/path/to/other.config'`. Whitelisted by name —
+// we don't accept arbitrary `foo 'bar'` because that's almost always a
+// typo for `foo = 'bar'` and silently rewriting it would lose user data.
+export interface AstDirective {
+  readonly kind: 'directive';
+  readonly name: string; // bare identifier, e.g. "includeConfig"
+  readonly line: number;
+  readonly col: number;
+  readonly startOffset: number;
+  readonly endOffset: number;
+}
+
+// Identifiers that may appear in `name <value>` (method-call) form at
+// file scope and should be preserved verbatim rather than rejected. Add
+// new entries with care: anything here will silently accept what looks
+// like a missing `=`.
+const FILE_SCOPE_DIRECTIVES = new Set(['includeConfig']);
 
 export interface ParseAstResult {
   readonly nodes: readonly AstNode[];
@@ -232,6 +251,29 @@ export function parseTokens(tokens: readonly Token[]): ParseAstResult {
         kind: 'block',
         segments,
         body,
+        line: start.line,
+        col: start.col,
+        startOffset: start.offset,
+        endOffset,
+      };
+    }
+    // Whitelisted method-call directive: `includeConfig 'path'`. Only
+    // accepted for a bare (non-dotted) identifier in FILE_SCOPE_DIRECTIVES
+    // followed by a literal argument — otherwise this would silently
+    // swallow typos like `fasta '/db'`.
+    if (
+      segments.length === 1 &&
+      FILE_SCOPE_DIRECTIVES.has(segments[0]!) &&
+      (next.kind === 'STRING' ||
+        next.kind === 'NUMBER' ||
+        next.kind === 'BOOL' ||
+        next.kind === 'NULL')
+    ) {
+      const arg = consume();
+      const endOffset = arg.offset + arg.text.length;
+      return {
+        kind: 'directive',
+        name: segments[0]!,
         line: start.line,
         col: start.col,
         startOffset: start.offset,

@@ -171,13 +171,13 @@ describe('emitConfig — golden files', () => {
     expect(emit(state)).toBe(golden('escape-edges.config'));
   });
 
-  it('preserved outer blocks are appended verbatim after params { }', () => {
+  it('preserved outer-scope content (blocks + directives) is appended verbatim after params { }', () => {
     const state: FormState = {
       mode: 'general',
       values: { fasta: '/db.fasta', search_engine: 'diann' },
       touched: { fasta: true, search_engine: true },
       preservedOuterText:
-        "process {\n    cpus = 4\n    memory = '16 GB'\n}\n\nprofiles {\n    standard { process.executor = 'local' }\n    cluster  { process.executor = 'slurm' }\n}",
+        "process {\n    cpus = 4\n    memory = '16 GB'\n}\n\nprofiles {\n    standard { process.executor = 'local' }\n    cluster  { process.executor = 'slurm' }\n}\n\nincludeConfig '/net/maccoss/includes/nextflow-dia.include'",
     };
     expect(emit(state)).toBe(golden('preserved-outer-blocks.config'));
   });

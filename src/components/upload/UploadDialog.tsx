@@ -143,10 +143,10 @@ export function UploadDialog({
               {parsed.preservedOuterBlocks.length > 0 ? (
                 <IssueGroup
                   tone="info"
-                  title={`${parsed.preservedOuterBlocks.length} block${
+                  title={`${parsed.preservedOuterBlocks.length} item${
                     parsed.preservedOuterBlocks.length === 1 ? '' : 's'
                   } preserved verbatim`}
-                  description="These blocks live outside params { } and will be appended to the generated config unchanged."
+                  description="Blocks (process { }, profiles { }, ...) and includeConfig directives that live outside params { } are appended to the generated config unchanged."
                   items={parsed.preservedOuterBlocks.map(
                     (b) => `${b.name} (line ${b.line})`,
                   )}
