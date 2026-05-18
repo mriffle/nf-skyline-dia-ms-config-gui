@@ -112,6 +112,7 @@ export function AppShell() {
                     isActive={activeTab === 'preview'}
                     onClick={() => setActiveTab('preview')}
                     controls="right-pane-preview"
+                    icon={<ConfigPreviewIcon />}
                   >
                     Config preview
                   </TabButton>
@@ -119,6 +120,7 @@ export function AppShell() {
                     isActive={activeTab === 'graph'}
                     onClick={() => setActiveTab('graph')}
                     controls="right-pane-graph"
+                    icon={<WorkflowGraphIcon />}
                   >
                     Workflow graph
                   </TabButton>
@@ -156,6 +158,7 @@ interface TabButtonProps {
   readonly isActive: boolean;
   readonly onClick: () => void;
   readonly controls: string;
+  readonly icon?: React.ReactNode;
   readonly children: React.ReactNode;
 }
 
@@ -199,7 +202,7 @@ function ResetIcon() {
   );
 }
 
-function TabButton({ isActive, onClick, controls, children }: TabButtonProps) {
+function TabButton({ isActive, onClick, controls, icon, children }: TabButtonProps) {
   return (
     <button
       type="button"
@@ -208,13 +211,59 @@ function TabButton({ isActive, onClick, controls, children }: TabButtonProps) {
       aria-controls={controls}
       onClick={onClick}
       className={[
-        'rounded-md border px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-accent-500',
+        'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-accent-500',
         isActive
           ? 'border-accent-500 bg-accent-500 text-white'
           : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
       ].join(' ')}
     >
+      {icon}
       {children}
     </button>
+  );
+}
+
+function ConfigPreviewIcon() {
+  // Document with code brackets — represents the generated config text.
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 2.75h6.25L15 6.5v10.75a.75.75 0 0 1-.75.75H5.75a.75.75 0 0 1-.75-.75V3.5a.75.75 0 0 1 .75-.75Z" />
+      <path d="M11 2.75V6.5H15" />
+      <path d="m8.25 10.5-1.5 1.75 1.5 1.75" />
+      <path d="m11.75 10.5 1.5 1.75-1.5 1.75" />
+    </svg>
+  );
+}
+
+function WorkflowGraphIcon() {
+  // Three connected nodes — evokes the DAG visualization.
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="5" cy="4.5" r="2" />
+      <circle cx="15" cy="10" r="2" />
+      <circle cx="5" cy="15.5" r="2" />
+      <path d="M6.7 5.6 13.3 8.9" />
+      <path d="M6.7 14.4 13.3 11.1" />
+    </svg>
   );
 }
