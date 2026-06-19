@@ -133,6 +133,21 @@ function carafeSourceIs(value: string) {
 
 const skylineNotSkipped = (s: FormState) => s.values['skyline.skip'] !== true;
 
+// True when uploaded outer-scope text already defines a profiles { } block.
+// In that case the user owns the profiles layer: the generator must not emit
+// its own `standard` profile (no override), and the resource/cache fields
+// that feed that profile are hidden from the form. Matched structurally — any
+// profile name counts, since we don't (and shouldn't) parse the names.
+export function hasPreservedProfilesBlock(text: string | undefined): boolean {
+  if (!text) return false;
+  return /(^|\n)[ \t]*profiles[ \t]*\{/.test(text);
+}
+
+// The resource/cache fields are emitted into the generated `standard`
+// profile, not params { }. They only make sense when we own the profiles
+// layer, so they're hidden once an uploaded config brings its own profiles.
+const noPreservedProfiles = (s: FormState) => !hasPreservedProfilesBlock(s.preservedOuterText);
+
 // --- Metadata ------------------------------------------------------------
 //
 // Order: by section, then by intra-section logical order.
@@ -1006,25 +1021,28 @@ export const paramMetadata: readonly ParamMeta[] = [
     path: 'max_cpus',
     section: 'execution',
     label: 'Maximum CPUs per task',
-    help: 'Upper bound on CPUs requested by any process. Profiles set sensible defaults (8 for standard/slurm, 32 for AWS Batch).',
+    help: 'Upper bound on CPUs any single task may request. Written into the generated standard profile (process.resourceLimits).',
     tier: 'advanced',
     widget: 'number',
+    visibleWhen: noPreservedProfiles,
   },
   {
     path: 'max_memory',
     section: 'execution',
     label: 'Maximum memory per task',
-    help: 'Upper bound on memory requested by any process. Nextflow memory-spec string, e.g. 12.GB or 250.GB.',
+    help: 'Upper bound on memory any single task may request. Nextflow memory-spec string, e.g. 12.GB or 250.GB. Written into the generated standard profile.',
     tier: 'advanced',
     widget: 'text',
+    visibleWhen: noPreservedProfiles,
   },
   {
     path: 'max_time',
     section: 'execution',
     label: 'Maximum walltime per task',
-    help: 'Upper bound on time requested by any process. Nextflow time-spec string, e.g. 240.h.',
+    help: 'Upper bound on time any single task may request. Nextflow time-spec string, e.g. 240.h. Written into the generated standard profile.',
     tier: 'advanced',
     widget: 'text',
+    visibleWhen: noPreservedProfiles,
   },
   {
     path: 'random_file_seed',
@@ -1038,17 +1056,25 @@ export const paramMetadata: readonly ParamMeta[] = [
     path: 'mzml_cache_directory',
     section: 'execution',
     label: 'mzML cache directory',
-    help: 'Where msconvert-produced mzMLs are cached across runs. Profiles set sensible defaults; override only when needed.',
+    help: 'Where msconvert-produced mzMLs are cached across runs. Written into the generated standard profile.',
     tier: 'advanced',
     widget: 'text',
+    visibleWhen: noPreservedProfiles,
+    // The schema default is an absolute path on the upstream author's cluster
+    // (/data/mass_spec/...) — useless for a general user. Ship a sane relative
+    // default in the generated profile instead.
+    defaultOverride: 'mzml_cache',
   },
   {
     path: 'panorama_cache_directory',
     section: 'execution',
     label: 'Panorama download cache directory',
-    help: 'Where downloaded Panorama files are cached across runs. Profiles set sensible defaults; override only when needed.',
+    help: 'Where downloaded Panorama files are cached across runs. Written into the generated standard profile.',
     tier: 'advanced',
     widget: 'text',
+    visibleWhen: noPreservedProfiles,
+    // Schema default is an upstream-cluster absolute path; ship a relative one.
+    defaultOverride: 'raw_cache',
   },
 ];
 

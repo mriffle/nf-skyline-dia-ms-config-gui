@@ -34,21 +34,21 @@ describe('parseConfig — emitter goldens parse cleanly', () => {
     expect(goldens.length).toBeGreaterThan(0);
   });
 
-  // Goldens that intentionally carry outer blocks (process { }, etc.) —
-  // for those we expect non-empty preservedOuterBlocks rather than an
-  // empty list. Anything else should round-trip cleanly with no outer
-  // content at all.
-  const GOLDENS_WITH_OUTER_BLOCKS = new Set(['preserved-outer-blocks.config']);
+  // Every emitter golden now carries the always-emitted `standard`
+  // execution profile, which the parser captures as a preserved outer
+  // block. The preserved-outer-blocks golden carries additional uploaded
+  // blocks (process { }, a user profiles { }, includeConfig) on top, and
+  // its own profiles block suppresses the generated one.
+  const GOLDENS_WITH_EXTRA_OUTER_BLOCKS = new Set(['preserved-outer-blocks.config']);
 
   for (const { name, content } of goldens) {
     it(`${name} → parses with no errors and finds a params block`, () => {
       const r = parseConfig(content);
       expect(r.errors).toEqual([]);
       expect(r.hadParamsBlock).toBe(true);
-      if (GOLDENS_WITH_OUTER_BLOCKS.has(name)) {
-        expect(r.preservedOuterBlocks.length).toBeGreaterThan(0);
-      } else {
-        expect(r.preservedOuterBlocks).toEqual([]);
+      expect(r.preservedOuterBlocks.length).toBeGreaterThan(0);
+      if (GOLDENS_WITH_EXTRA_OUTER_BLOCKS.has(name)) {
+        expect(r.preservedOuterBlocks.length).toBeGreaterThan(1);
       }
       expect(r.ignoredTopLevelAssignments).toEqual([]);
       expect(r.duplicates).toEqual([]);

@@ -10,7 +10,10 @@
 import { useState } from 'react';
 import { useStore } from '../../state/store';
 import { schemaDerived } from '../../params/schemaDerived.generated';
-import { paramMetadataByPath } from '../../params/paramMetadata';
+import {
+  hasPreservedProfilesBlock,
+  paramMetadataByPath,
+} from '../../params/paramMetadata';
 
 export function PreservedBlocksNotice() {
   const preservedOuterText = useStore((s) => s.preservedOuterText);
@@ -20,6 +23,7 @@ export function PreservedBlocksNotice() {
 
   const hasOuterText =
     preservedOuterText !== undefined && preservedOuterText.length > 0;
+  const hasOwnProfiles = hasPreservedProfilesBlock(preservedOuterText);
   const preservedHiddenPaths = collectPreservedHiddenPaths(values, touched);
 
   if (!hasOuterText && preservedHiddenPaths.length === 0) {
@@ -37,6 +41,15 @@ export function PreservedBlocksNotice() {
           / <code className="rounded bg-sky-100 px-1 font-mono text-[12px]">profiles</code> blocks,{' '}
           <code className="rounded bg-sky-100 px-1 font-mono text-[12px]">includeConfig</code> directives) will be
           appended to the generated config verbatim.
+        </p>
+      ) : null}
+      {hasOwnProfiles ? (
+        <p className="mt-1 text-[13px] text-sky-900">
+          Your uploaded config defines its own{' '}
+          <code className="rounded bg-sky-100 px-1 font-mono text-[12px]">profiles</code> section, so
+          the builder won&apos;t add or override one. Set resource limits (CPUs, memory, walltime)
+          and cache directories there — those form fields are hidden while your profiles section is
+          in use.
         </p>
       ) : null}
       {preservedHiddenPaths.length > 0 ? (

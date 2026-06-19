@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -14,6 +14,18 @@ const FIXED_TIMESTAMP = new Date('2026-01-15T12:00:00.000Z');
 
 function golden(name: string): string {
   return readFileSync(join(GOLDEN_DIR, name), 'utf8');
+}
+
+// Set REGEN_GOLDENS=1 to rewrite golden files from current emitter output
+// instead of asserting against them. Use after an intentional rendering
+// change, then re-run normally and inspect the diff.
+const REGEN = process.env.REGEN_GOLDENS === '1';
+function checkGolden(actual: string, name: string): void {
+  if (REGEN) {
+    writeFileSync(join(GOLDEN_DIR, name), actual);
+    return;
+  }
+  expect(actual).toBe(golden(name));
 }
 
 interface MakeStateInput {
@@ -63,7 +75,7 @@ describe('emitConfig — header + structure', () => {
 
 describe('emitConfig — golden files', () => {
   it('empty state -> only the alwaysEmit search_engine appears', () => {
-    expect(emit(makeState())).toBe(golden('empty.config'));
+    checkGolden(emit(makeState()), 'empty.config');
   });
 
   it('general / DIA-NN minimal', () => {
@@ -75,7 +87,7 @@ describe('emitConfig — golden files', () => {
         fasta: '/db.fasta',
       },
     });
-    expect(emit(state)).toBe(golden('general-diann-minimal.config'));
+    checkGolden(emit(state), 'general-diann-minimal.config');
   });
 
   it('general / EncyclopeDIA narrow + wide', () => {
@@ -88,7 +100,7 @@ describe('emitConfig — golden files', () => {
         spectral_library: '/lib.dlib',
       },
     });
-    expect(emit(state)).toBe(golden('general-encyclopedia-narrow-wide.config'));
+    checkGolden(emit(state), 'general-encyclopedia-narrow-wide.config');
   });
 
   it('general / Cascadia nested block', () => {
@@ -100,12 +112,12 @@ describe('emitConfig — golden files', () => {
         'cascadia.score_threshold': 0.85,
       },
     });
-    expect(emit(state)).toBe(golden('general-cascadia.config'));
+    checkGolden(emit(state), 'general-cascadia.config');
   });
 
   it('no-search mode emits bare null', () => {
     const state = makeState({ values: { search_engine: null } });
-    expect(emit(state)).toBe(golden('general-no-search.config'));
+    checkGolden(emit(state), 'general-no-search.config');
   });
 
   it('batch-map quant_spectra_dir emits a Groovy Map literal', () => {
@@ -121,7 +133,7 @@ describe('emitConfig — golden files', () => {
         },
       },
     });
-    expect(emit(state)).toBe(golden('general-batch-map.config'));
+    checkGolden(emit(state), 'general-batch-map.config');
   });
 
   it('PDC / DIA-NN simple', () => {
@@ -134,7 +146,7 @@ describe('emitConfig — golden files', () => {
         fasta: '/db.fasta',
       },
     });
-    expect(emit(state)).toBe(golden('pdc-diann-simple.config'));
+    checkGolden(emit(state), 'pdc-diann-simple.config');
   });
 
   it('PDC + Carafe sample', () => {
@@ -148,7 +160,7 @@ describe('emitConfig — golden files', () => {
         'carafe.include_phosphorylation': true,
       },
     });
-    expect(emit(state)).toBe(golden('pdc-carafe-sample.config'));
+    checkGolden(emit(state), 'pdc-carafe-sample.config');
   });
 
   it('msconvert-only with bool false', () => {
@@ -159,7 +171,7 @@ describe('emitConfig — golden files', () => {
         'msconvert.do_demultiplex': false,
       },
     });
-    expect(emit(state)).toBe(golden('msconvert-only.config'));
+    checkGolden(emit(state), 'msconvert-only.config');
   });
 
   it('escape edges (quotes and backslashes)', () => {
@@ -168,7 +180,7 @@ describe('emitConfig — golden files', () => {
         'diann.fasta_digest_params': "--cut 'K*,R*,!*P' --bs\\path",
       },
     });
-    expect(emit(state)).toBe(golden('escape-edges.config'));
+    checkGolden(emit(state), 'escape-edges.config');
   });
 
   it('preserved outer-scope content (blocks + directives) is appended verbatim after params { }', () => {
@@ -179,7 +191,91 @@ describe('emitConfig — golden files', () => {
       preservedOuterText:
         "process {\n    cpus = 4\n    memory = '16 GB'\n}\n\nprofiles {\n    standard { process.executor = 'local' }\n    cluster  { process.executor = 'slurm' }\n}\n\nincludeConfig '/net/maccoss/includes/nextflow-dia.include'",
     };
-    expect(emit(state)).toBe(golden('preserved-outer-blocks.config'));
+    checkGolden(emit(state), 'preserved-outer-blocks.config');
+  });
+});
+
+describe('emitConfig — generated standard profile', () => {
+  it('always appends a standard profile with default resource limits', () => {
+    const out = emit(makeState());
+    expect(out).toContain('// Execution profile');
+    expect(out).toContain('profiles {');
+    expect(out).toContain('standard {');
+    expect(out).toContain("process.executor = 'local'");
+    expect(out).toContain(
+      "process.resourceLimits = [ cpus: 8, memory: '12.GB', time: '240.h' ]",
+    );
+    expect(out).toContain("params.mzml_cache_directory = 'mzml_cache'");
+    expect(out).toContain("params.panorama_cache_directory = 'raw_cache'");
+  });
+
+  it('reflects the resource/cache form fields in the profile', () => {
+    const state = makeState({
+      values: {
+        max_cpus: 32,
+        max_memory: '250.GB',
+        max_time: '72.h',
+        mzml_cache_directory: '/scratch/mzml',
+        panorama_cache_directory: '/scratch/raw',
+      },
+    });
+    const out = emit(state);
+    expect(out).toContain(
+      "process.resourceLimits = [ cpus: 32, memory: '250.GB', time: '72.h' ]",
+    );
+    expect(out).toContain("params.mzml_cache_directory = '/scratch/mzml'");
+    expect(out).toContain("params.panorama_cache_directory = '/scratch/raw'");
+  });
+
+  it('never emits the resource/cache params inside params { }', () => {
+    const state = makeState({ values: { max_cpus: 16, fasta: '/db.fasta' } });
+    const out = emit(state);
+    const paramsBlock = out.slice(out.indexOf('params {'), out.indexOf('// Execution profile'));
+    expect(paramsBlock).not.toContain('max_cpus');
+  });
+
+  it('suppresses the generated profile when the upload already has a profiles block', () => {
+    const state: FormState = {
+      mode: 'general',
+      values: { fasta: '/db.fasta' },
+      touched: { fasta: true },
+      preservedOuterText:
+        "profiles {\n    cluster { process.executor = 'slurm' }\n}",
+    };
+    const out = emit(state);
+    expect(out).not.toContain('// Execution profile');
+    // The user's profiles block rides through under the preserved banner.
+    expect(out).toContain('Preserved from uploaded config');
+    expect(out).toContain("cluster { process.executor = 'slurm' }");
+    // Exactly one profiles block in the output.
+    expect(out.match(/profiles \{/g)?.length).toBe(1);
+  });
+
+  it('keeps an uploaded resource param in params { } when profiles are preserved (no silent drop)', () => {
+    const state: FormState = {
+      mode: 'general',
+      values: { max_cpus: 16 },
+      touched: { max_cpus: true },
+      preservedOuterText: "profiles {\n    standard { x = 1 }\n}",
+    };
+    const out = emit(state);
+    // Generated profile suppressed, but the value survives at top level.
+    expect(out).not.toContain('// Execution profile');
+    expect(out).toContain('max_cpus = 16');
+  });
+
+  it('still emits the generated profile when preserved content has no profiles block', () => {
+    const state: FormState = {
+      mode: 'general',
+      values: { fasta: '/db.fasta' },
+      touched: { fasta: true },
+      preservedOuterText: "process {\n    cpus = 4\n}",
+    };
+    const out = emit(state);
+    expect(out).toContain('// Execution profile');
+    expect(out).toContain('profiles {');
+    expect(out).toContain('Preserved from uploaded config');
+    expect(out).toContain('cpus = 4');
   });
 });
 

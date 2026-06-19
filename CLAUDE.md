@@ -277,6 +277,34 @@ render as one `images { … }` block). They share `state.values` /
 `state.touched` with regular paths; only the routing in `groupBySection`
 distinguishes them.
 
+**Always-emitted `standard` execution profile** (a second exception to
+"emit only modelled params"). After `params { }`, the emitter appends a
+`profiles { standard { … } }` block (see `renderProfilesBlock` in
+`emitConfig.ts`) so users always have a visible, commented place to set
+local-run resources. It carries `process.executor`,
+`process.resourceLimits = [ cpus, memory, time ]`, and the two cache-dir
+`params.*`. The values come from five form fields —
+`max_cpus` / `max_memory` / `max_time` / `mzml_cache_directory` /
+`panorama_cache_directory` (listed in `PROFILE_PARAM_PATHS`) — which are
+**routed out of `params { }` entirely** (`collectEntries` skips them) and
+into this profile. The profile is built from `state.values[path]` if set,
+else `getEffectiveDefault(meta)`; the two cache dirs use `defaultOverride`
+(`mzml_cache` / `raw_cache`) because the schema defaults are the upstream
+author's absolute cluster paths.
+
+Two worlds, branched on `hasPreservedProfilesBlock(state.preservedOuterText)`
+(exported from `paramMetadata.ts` — a structural `/profiles\s*\{/` test, so
+any inner profile name counts):
+- **We own the profiles layer** (fresh config, or uploaded config with no
+  `profiles { }`): the generated `standard` profile is emitted; the five
+  form fields are visible.
+- **The user owns it** (uploaded config already has a `profiles { }`): the
+  generated profile is **suppressed** (we never override the user's
+  profiles, which may have arbitrary names like `slurm` / `aws`); their
+  block round-trips verbatim via `preservedOuterText`. The five form fields
+  are hidden (`visibleWhen: noPreservedProfiles`) and `PreservedBlocksNotice`
+  explains resources are managed in their own profiles section.
+
 ### 5. Validation
 
 Two layers, both running on every state change:
@@ -735,14 +763,19 @@ doesn't carry the field.
 1. **Idempotency** for every emit golden: parse → emit → parse → emit
    produces the same bytes as the first emit. This is the user-facing
    property — a load + re-download converges after one cycle.
-2. **Byte-stable** parse → emit reproduces the original golden — but
-   only for goldens whose source state contained every
-   `alwaysEmit`-eligible field for the chosen engine
-   (`general-cascadia.config`, `general-diann-minimal.config`,
-   `general-encyclopedia-narrow-wide.config`, `general-no-search.config`,
-   `pdc-diann-simple.config`, `preserved-outer-blocks.config`). The
-   other goldens were constructed with stripped emit-test states; see
-   "Hard rules" gotcha on engine-predicate asymmetry below.
+2. **Byte-stable** parse → emit reproduces the original golden — now only
+   for `preserved-outer-blocks.config`. The always-emitted `standard`
+   profile (§4) breaks byte-stability for ordinary goldens: it is generated
+   under an "Execution profile" banner, but on re-upload the parser captures
+   it into `preservedOuterText`, so the second emit re-renders it under the
+   generic "Preserved from uploaded config" banner. Identical content, only
+   the banner relabels — so those goldens are idempotency-only (they still
+   converge after one cycle, verified by property 1).
+   `preserved-outer-blocks.config` already carries its own `profiles { }`
+   block, which suppresses the generated profile, so there's no banner to
+   relabel and it stays byte-stable. (Two other reasons a golden could be
+   idempotency-only: stripped emit-test states and the engine-predicate
+   `alwaysEmit` asymmetry — see the "Hard rules" gotcha below.)
 
 ### 10. Wizard (guided form entry)
 
@@ -1088,11 +1121,11 @@ When you add an `alwaysEmit` field:
 | `checkWellFormedness` (emit goldens) | YES     | Regression guard: emitter output must always be well-formed |
 | `checkWellFormedness` outer-block tolerance | YES | Nextflow process selectors, dotted refs, GString in outer blocks must NOT fail the gate |
 | Round-trip (parse → emit) idempotency| YES     | Per emit golden                      |
-| Round-trip byte-stable               | PARTIAL | Realistic-state goldens only — see §9 |
+| Round-trip byte-stable               | PARTIAL | Only preserved-outer-blocks now — see §9 |
 | Upload UI flow (UploadControl)       | YES     | Button → preview → load → store; both error variants |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **494 tests across 24 files**. Run `npm test` before pushing.
+Current count: **498 tests across 25 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff

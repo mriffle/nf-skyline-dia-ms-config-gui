@@ -22,6 +22,7 @@ import {
   paramMetadataByPath,
   getEffectiveDefault,
   isAlwaysEmit,
+  hasPreservedProfilesBlock,
 } from '../params/paramMetadata';
 import { sections, type Section } from '../params/sections';
 import { toGroovyLiteral } from './groovyLiteral';
@@ -46,6 +47,17 @@ const COMMENT_BODY_WIDTH = 81;
 
 // Width of the '=' bars in section banner comments (content only).
 const BANNER_BAR_WIDTH = 72;
+
+// Resource/cache params that are emitted into the generated `standard`
+// execution profile rather than into params { }. They never appear in the
+// params block; renderProfilesBlock reads them directly from state.
+const PROFILE_PARAM_PATHS: ReadonlySet<string> = new Set([
+  'max_cpus',
+  'max_memory',
+  'max_time',
+  'mzml_cache_directory',
+  'panorama_cache_directory',
+]);
 
 // ---------------------------------------------------------------------------
 // Param ordering & virtual handling
@@ -147,8 +159,16 @@ function collectEntries(state: FormState): OrderedEntry[] {
   const entries: OrderedEntry[] = [];
   const seenPaths = new Set<string>();
 
+  // The resource/cache params are routed into the generated standard profile
+  // — but only when we actually generate it. If the upload owns the profiles
+  // layer the generated profile is suppressed, so any such param loaded from
+  // the upload must still emit into params { } (top-level) to avoid dropping
+  // it silently.
+  const generatesProfile = !hasPreservedProfilesBlock(state.preservedOuterText);
+
   const consider = (path: string, rawValue: unknown): void => {
     if (seenPaths.has(path)) return;
+    if (generatesProfile && PROFILE_PARAM_PATHS.has(path)) return; // in the profile block
     const info = infoForPath(path);
     if (info.virtualOnly) return; // UI-only virtuals don't emit
     const value = normalizeValue(path, rawValue);
@@ -361,7 +381,62 @@ export function emitConfig(state: FormState, options?: EmitOptions): string {
   const empty = grouped.sectionGroups.length === 0 && grouped.preservedEntries.length === 0;
   const paramsBody = empty ? 'params { }' : renderParamsBlock(grouped);
 
-  return `${head}\n${paramsBody}\n${renderPreservedOuterBlocks(state.preservedOuterText)}`;
+  return `${head}\n${paramsBody}\n${renderProfilesBlock(state)}${renderPreservedOuterBlocks(state.preservedOuterText)}`;
+}
+
+// Effective Groovy literal for a profile-bound param: the user's value if
+// set, otherwise the field's effective default.
+function profileLiteral(state: FormState, path: string): string {
+  const meta = paramMetadataByPath[path];
+  const raw =
+    path in state.values
+      ? state.values[path]
+      : meta
+        ? getEffectiveDefault(meta)
+        : undefined;
+  return toGroovyLiteral(raw, 0, path);
+}
+
+// Always-emitted `standard` execution profile, built from the resource/cache
+// form fields. Run with `-profile standard` to apply it. Suppressed when the
+// uploaded config already carried its own profiles { } block — the user owns
+// the profiles layer and we never override it.
+function renderProfilesBlock(state: FormState): string {
+  if (hasPreservedProfilesBlock(state.preservedOuterText)) return '';
+  const bar = `// ${'='.repeat(BANNER_BAR_WIDTH)}`;
+  const cpus = profileLiteral(state, 'max_cpus');
+  const memory = profileLiteral(state, 'max_memory');
+  const time = profileLiteral(state, 'max_time');
+  const mzmlCache = profileLiteral(state, 'mzml_cache_directory');
+  const panoramaCache = profileLiteral(state, 'panorama_cache_directory');
+  const i1 = INDENT;
+  const i2 = INDENT.repeat(2);
+  const lines: string[] = [
+    bar,
+    '// Execution profile',
+    bar,
+    ...wrapCommentLines(
+      'Run the workflow with `-profile standard` to apply these settings. ' +
+        'resourceLimits caps the CPUs, memory, and walltime any single task ' +
+        'may request — edit them to match the machine you run on. The workflow ' +
+        'also ships slurm and awsbatch profiles for cluster and cloud runs.',
+      0,
+    ),
+    'profiles {',
+    `${i1}standard {`,
+    `${i2}process.executor = 'local'`,
+    '',
+    `${i2}// Cap on the resources any single task may request.`,
+    `${i2}process.resourceLimits = [ cpus: ${cpus}, memory: ${memory}, time: ${time} ]`,
+    '',
+    `${i2}// Where msconvert mzML output and downloaded Panorama files`,
+    `${i2}// are cached between runs.`,
+    `${i2}params.mzml_cache_directory = ${mzmlCache}`,
+    `${i2}params.panorama_cache_directory = ${panoramaCache}`,
+    `${i1}}`,
+    '}',
+  ];
+  return `\n${lines.join('\n')}\n`;
 }
 
 function renderParamsBlock(grouped: GroupedEntries): string {
