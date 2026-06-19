@@ -398,9 +398,10 @@ function profileLiteral(state: FormState, path: string): string {
 }
 
 // Always-emitted `standard` execution profile, built from the resource/cache
-// form fields. Run with `-profile standard` to apply it. Suppressed when the
-// uploaded config already carried its own profiles { } block — the user owns
-// the profiles layer and we never override it.
+// form fields. Nextflow applies the `standard` profile automatically when no
+// -profile is given, so these settings take effect by default. Suppressed
+// when the uploaded config already carried its own profiles { } block — the
+// user owns the profiles layer and we never override it.
 function renderProfilesBlock(state: FormState): string {
   if (hasPreservedProfilesBlock(state.preservedOuterText)) return '';
   const bar = `// ${'='.repeat(BANNER_BAR_WIDTH)}`;
@@ -416,10 +417,12 @@ function renderProfilesBlock(state: FormState): string {
     '// Execution profile',
     bar,
     ...wrapCommentLines(
-      'Run the workflow with `-profile standard` to apply these settings. ' +
-        'resourceLimits caps the CPUs, memory, and walltime any single task ' +
-        'may request — edit them to match the machine you run on. The workflow ' +
-        'also ships slurm and awsbatch profiles for cluster and cloud runs.',
+      'This is the standard profile — Nextflow applies it automatically when ' +
+        'you run without a -profile option, so these settings take effect by ' +
+        'default. resourceLimits caps the CPUs, memory, and walltime any single ' +
+        'task may request — edit them to match the machine you run on. The ' +
+        'workflow also ships slurm and awsbatch profiles; pass e.g. ' +
+        '`-profile slurm` to use one instead.',
       0,
     ),
     'profiles {',
