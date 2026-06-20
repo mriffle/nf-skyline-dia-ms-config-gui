@@ -12,10 +12,9 @@
 
 import { useRef, useState, type ChangeEvent } from 'react';
 import { useStore } from '../../state/store';
-import { mapToState, type MapResult } from '../../parse/mapToState';
-import { parseConfig } from '../../parse/parseConfig';
+import type { MapResult } from '../../parse/mapToState';
+import { runLoadPipeline } from '../../parse/loadPipeline';
 import type { ParseResult } from '../../parse/types';
-import { checkWellFormedness } from '../../parse/wellFormedness';
 import { UploadDialog } from './UploadDialog';
 import { UploadErrorDialog, type UploadErrorVariant } from './UploadErrorDialog';
 
@@ -75,7 +74,13 @@ function LoadIcon() {
   );
 }
 
-export function UploadControl() {
+interface UploadControlProps {
+  // Disabled while the preview is in in-place edit mode, so loading a
+  // file can't replace state out from under an in-progress edit.
+  readonly disabled?: boolean;
+}
+
+export function UploadControl({ disabled = false }: UploadControlProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PendingPreview | null>(null);
   const [error, setError] = useState<PendingError | null>(null);
@@ -116,57 +121,52 @@ export function UploadControl() {
       return;
     }
 
-    // Pre-flight: gate the upload on syntactic well-formedness. Partial
-    // parses (where the lexer or parser recovers from a typo and
-    // silently drops the surrounding context) would otherwise load only
-    // the salvageable entries — and the user would never know the rest
-    // of the file was eaten by recovery. The dialog offers an "Import"
-    // bypass so a false positive in our checker isn't a hard block;
-    // see runParseAndPreview below.
-    const wf = checkWellFormedness(text);
-    if (!wf.isWellFormed) {
-      setError({
-        fileName: file.name,
-        variant: { kind: 'syntax-errors', issues: wf.issues },
-        sourceText: text,
-      });
-      return;
-    }
-
-    runParseAndPreview(file.name, text);
+    // The pipeline runs the well-formedness gate first (a hard stop —
+    // partial recovered parses must never load silently). The
+    // syntax-errors dialog offers an "Import" bypass for the rare false
+    // positive; see onProceedAnyway below.
+    processText(file.name, text, false);
   };
 
-  // Post-gate pipeline. Extracted so the "Import" bypass can resume
-  // from here using the stashed file text without re-reading the file
-  // (which would also re-fire the well-formedness check).
-  const runParseAndPreview = (fileName: string, text: string): void => {
-    const parsed = parseConfig(text);
-    if (!parsed.hadParamsBlock || parsed.entries.length === 0) {
-      setError({
-        fileName,
-        variant: {
-          kind: 'no-params-block',
-          hadParamsBlock: parsed.hadParamsBlock,
-          errors:
-            parsed.errors.length > 0
-              ? parsed.errors
-              : [
-                  {
-                    line: 0,
-                    col: 0,
-                    message: parsed.hadParamsBlock
-                      ? 'The params { } block contained no parameters.'
-                      : 'No params { } block was found.',
-                  },
-                ],
-        },
-      });
-      return;
+  // Run the shared load pipeline and route its outcome to the preview or
+  // error dialog. `skipWellFormedness` is the "Import anyway" bypass,
+  // which resumes from the stashed file text without re-reading the file.
+  const processText = (
+    fileName: string,
+    text: string,
+    skipWellFormedness: boolean,
+  ): void => {
+    const outcome = runLoadPipeline(text, { skipWellFormedness });
+    switch (outcome.kind) {
+      case 'syntax-errors':
+        setError({
+          fileName,
+          variant: { kind: 'syntax-errors', issues: outcome.issues },
+          sourceText: text,
+        });
+        return;
+      case 'no-params':
+        setError({
+          fileName,
+          variant: {
+            kind: 'no-params-block',
+            hadParamsBlock: outcome.hadParamsBlock,
+            errors: outcome.errors,
+          },
+        });
+        return;
+      case 'ok': {
+        const current = useStore.getState();
+        const confirmReplace = Object.values(current.touched).some((v) => v === true);
+        setPreview({
+          fileName,
+          parsed: outcome.parsed,
+          mapped: outcome.mapped,
+          confirmReplace,
+        });
+        return;
+      }
     }
-    const mapped = mapToState(parsed.entries, parsed.preservedOuterBlocks);
-    const current = useStore.getState();
-    const confirmReplace = Object.values(current.touched).some((v) => v === true);
-    setPreview({ fileName, parsed, mapped, confirmReplace });
   };
 
   const onConfirm = (): void => {
@@ -192,7 +192,7 @@ export function UploadControl() {
     }
     const { fileName, sourceText } = error;
     setError(null);
-    runParseAndPreview(fileName, sourceText);
+    processText(fileName, sourceText, true);
   };
 
   return (
@@ -211,9 +211,12 @@ export function UploadControl() {
       <button
         type="button"
         onClick={triggerPicker}
+        disabled={disabled}
+        title={disabled ? 'Finish editing the config text first' : undefined}
         className={[
           'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700',
           'hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-accent-500',
+          'disabled:cursor-not-allowed disabled:opacity-50',
         ].join(' ')}
       >
         <LoadIcon />

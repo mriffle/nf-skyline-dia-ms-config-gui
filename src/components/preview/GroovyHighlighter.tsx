@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, type ReactElement } from 'react';
 
 type TokenType =
   | 'comment'
@@ -101,25 +101,32 @@ const CLASS_BY_TYPE: Record<TokenType, string> = {
   newline: '',
 };
 
+// Shared font metrics — MUST be identical in the read-only <pre> and the
+// editor overlay (CodeEditor) or the textarea caret drifts off the glyphs.
+export const HIGHLIGHT_FONT_CLASSES = 'font-mono text-[12.5px] leading-[1.55]';
+
+// Token → colored <span>s. Reused by the read-only highlighter and by the
+// CodeEditor overlay so both layers render byte-identical glyphs.
+export function highlightTokens(source: string): ReactElement[] {
+  return tokenize(source).map((t, i) =>
+    t.type === 'newline' || t.type === 'space' ? (
+      <span key={i}>{t.text}</span>
+    ) : (
+      <span key={i} className={CLASS_BY_TYPE[t.type]}>
+        {t.text}
+      </span>
+    ),
+  );
+}
+
 export const GroovyHighlighter = memo(function GroovyHighlighter({
   source,
 }: {
   source: string;
 }) {
-  const tokens = tokenize(source);
   return (
-    <pre className="overflow-auto font-mono text-[12.5px] leading-[1.55] text-slate-100">
-      <code>
-        {tokens.map((t, i) =>
-          t.type === 'newline' || t.type === 'space' ? (
-            <span key={i}>{t.text}</span>
-          ) : (
-            <span key={i} className={CLASS_BY_TYPE[t.type]}>
-              {t.text}
-            </span>
-          ),
-        )}
-      </code>
+    <pre className={`overflow-auto ${HIGHLIGHT_FONT_CLASSES} text-slate-100`}>
+      <code>{highlightTokens(source)}</code>
     </pre>
   );
 });

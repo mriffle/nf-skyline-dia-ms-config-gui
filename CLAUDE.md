@@ -82,6 +82,8 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── groovyParser.ts             AST: blocks + assignments
     │   ├── parseConfig.ts              find params { } + flatten to entries
     │   ├── wellFormedness.ts           pre-flight syntax gate — see §9 sub
+    │   ├── loadPipeline.ts             shared text→outcome pipeline (gate→parse→map);
+    │   │                               used by upload AND editable preview — see §11
     │   └── mapToState.ts               entries → FormState + UploadReport
     ├── components/
     │   ├── layout/                     AppShell (hosts Preview/Workflow tabs + Wizard overlay),
@@ -89,7 +91,10 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── form/                       Section, Field, FieldShell, HelpPopover,
     │   │                               AdvancedToggle, ValidationSummary
     │   ├── widgets/                    10 widgets — see "Widget catalog" below
-    │   ├── preview/                    PreviewPane, GroovyHighlighter, PreviewActions
+    │   ├── preview/                    PreviewPane (read-only view + in-place text editor),
+    │   │                               GroovyHighlighter (+ highlightTokens helper),
+    │   │                               CodeEditor (highlighted overlay editor),
+    │   │                               PreviewActions — see §11
     │   ├── workflow/                   WorkflowGraphPane, WorkflowGraphSvg (live DAG render)
     │   ├── upload/                     UploadControl, UploadDialog, UploadErrorDialog
     │   ├── wizard/                     Wizard, WizardChrome, WizardRadioCards,
@@ -119,6 +124,15 @@ wizard end-to-end (the happy path + the PDC / Cascadia / Carafe branches)
 and dump screenshots under `screenshots/wizard*/`. Useful for verifying
 that `shouldShow` predicates and per-screen radio cards still render
 correctly after touching wizard/flow.ts or any screen file.
+
+`scripts/edit-diag.mjs` drives the editable preview (§11): it measures the
+read-only preview box vs the edit overlay box (they must match) and
+screenshots the edit / confirm-dialog / syntax-error states to
+`screenshots/edit/`. Run after touching `PreviewPane` / `CodeEditor` /
+`PreviewActions` or the right-pane layout — the failure modes it guards
+are the editor collapsing / `CodeEditor`'s two layers drifting out of
+alignment, a second scrollbar appearing, and the modal being trapped in
+the sticky stacking context (must portal to `document.body`).
 
 ## Architecture — the load-bearing concepts
 
@@ -875,6 +889,84 @@ neither Carafe nor an uploaded library is active — without this,
 clicking "Predict" would clear `use_carafe` and leave no radio
 selected (because predict is the absence of the other two flags).
 
+### 11. Editable preview (in-place text editing)
+
+The Config-preview pane doubles as a lightweight text editor. The
+**Edit** button (in `PreviewActions`) snapshots the current
+`emitConfig(state)` into a transient `draft` buffer and switches the
+pane from the read-only `GroovyHighlighter` to the **`CodeEditor`**
+overlay (a syntax-highlighted editable view). This is **Option A**:
+edits round-trip *through state* — the text is never the source of
+truth.
+
+- **Suspended projection**: while editing, the live `emitConfig` is not
+  rendered (only the `draft` is), so a form change can't clobber the
+  buffer. The buffer seeds once on entering edit mode and only changes
+  on keystrokes.
+- **Apply** runs the shared `runLoadPipeline(draft)` (`src/parse/loadPipeline.ts`
+  — the same gate→parse→map used by upload):
+    * `syntax-errors` / `no-params` → reuse `UploadErrorDialog`; stay in
+      edit mode so the user can fix it (no "Import anyway" bypass here —
+      the gate must hold for hand edits).
+    * `ok` with notices (issues / duplicates / preserved outer blocks /
+      ignored top-level assignments) → reuse `UploadDialog` with
+      `source="edit"` (relabels title→"Apply edited configuration?",
+      button→"Apply", and the caller passes `confirmReplace={false}`).
+      Confirm → `loadFromConfig`; Cancel → stay editing.
+    * `ok` with zero notices → commit silently via `loadFromConfig`.
+- **Cancel** discards the buffer and resumes the live view.
+- **Contract / canonicalization**: Apply re-parses, so it is **lossy**
+  exactly like upload — unknown (non-schema) params and any comments
+  *inside* `params { }` are dropped; ordering/comments/banners
+  regenerate. Outer blocks + hidden params still round-trip (§9).
+- **Known interaction (decision (a), accepted + surfaced)**: for a fresh
+  config the emitted text contains the generated `standard` profile
+  (§4). On Apply the parser captures it into `preservedOuterText`, which
+  flips `hasPreservedProfilesBlock` true — so on re-emit the profile is
+  re-rendered under the "Preserved from uploaded config" banner and the
+  five execution form fields hide (`visibleWhen: noPreservedProfiles`).
+  So **Edit→Apply with no changes is not a perfect no-op** for a fresh
+  config (config-equivalent, idempotent thereafter). The notices dialog
+  surfaces this as "1 item preserved verbatim" rather than hiding it.
+- **Shell guarding** (`AppShell`): editing state is mirrored up via
+  `PreviewPane`'s `onEditingChange` callback. While editing, AppShell
+  disables the Workflow-graph tab (so `PreviewPane` can't unmount and
+  lose the buffer), Reset, Start-wizard, and Load-config (`UploadControl`
+  gained a `disabled` prop), and dims the `FormPane` with a
+  pointer-events overlay. Download/Copy are hidden in the edit toolbar —
+  you Apply first, then download from the read-only view (so downloads
+  always reflect validated, state-derived output).
+- **`CodeEditor` overlay** (`src/components/preview/CodeEditor.tsx`):
+  syntax highlighting in an editable area is impossible with a bare
+  `<textarea>` (single text color), and editor libraries (CodeMirror /
+  Monaco) are barred by hard rules #4/#8. So it's the hand-rolled
+  overlay: a **transparent-text `<textarea>` sits exactly on top of a
+  highlighted `<pre>`** (rendered via `highlightTokens` — the shared
+  helper extracted from `GroovyHighlighter`). The user edits the
+  textarea (`text-transparent` + `caret-slate-100`) and sees the colored
+  `<pre>` through it. Both layers are full-content-size inside ONE
+  scrolling parent, so they scroll together with **no JS scroll-sync**.
+  Alignment invariants (verified by `scripts/edit-diag.mjs`):
+    * Both layers MUST share `HIGHLIGHT_FONT_CLASSES` (exported from
+      `GroovyHighlighter`) + identical `px-3 py-3` padding, or the caret
+      drifts off the glyphs.
+    * The `<pre>` is in-flow (drives the box height/width, so the pane
+      doesn't collapse — the same mechanism the read-only `<pre>` uses);
+      the `<textarea>` is `absolute inset-0` over it.
+    * The outer `overflow-auto` div is the **sole scroller**; the
+      textarea is `overflow-hidden` so it never adds a second scrollbar.
+    * A trailing `\n` in a `white-space: pre` block has no height, so a
+      zero-width space is appended to the highlight source when the value
+      ends in a newline (or is empty) — otherwise the highlight layer is
+      one line shorter than the textarea and the bottom drifts.
+- **Sticky-stacking-context gotcha (don't regress —
+  `scripts/edit-diag.mjs` guards it)**:
+    * The preview column is `position: sticky` → a stacking context. A
+      dialog rendered inside the aside is trapped at `z:auto` there, so
+      the form-dim overlay (`z-10`, which lands in the *root* stacking
+      context) paints over it and washes it out. Fix: both dialogs are
+      `createPortal`'d to `document.body`.
+
 ## Hard rules / invariants
 
 1. **Emit only touched paths.** Never auto-write defaults into state.
@@ -1123,9 +1215,11 @@ When you add an `alwaysEmit` field:
 | Round-trip (parse → emit) idempotency| YES     | Per emit golden                      |
 | Round-trip byte-stable               | PARTIAL | Only preserved-outer-blocks now — see §9 |
 | Upload UI flow (UploadControl)       | YES     | Button → preview → load → store; both error variants |
+| Editable preview (PreviewPane)       | YES     | Edit→Apply round-trip: clean / notices-confirm / syntax-reject / cancel |
+| CodeEditor overlay                   | YES     | Textarea binding + highlight layer sync; alignment is visual (edit-diag) |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **498 tests across 25 files**. Run `npm test` before pushing.
+Current count: **510 tests across 27 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
