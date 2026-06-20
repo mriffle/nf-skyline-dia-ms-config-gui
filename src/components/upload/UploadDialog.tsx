@@ -9,10 +9,15 @@ import type { SchemaShape } from '../../params/schemaTypes';
 import type { ParseResult } from '../../parse/types';
 
 interface UploadDialogProps {
-  readonly fileName: string;
+  // Omitted for the in-place edit flow (source === 'edit'), where there
+  // is no file — the config came from the editable preview buffer.
+  readonly fileName?: string;
   readonly parsed: ParseResult;
   readonly report: UploadReport;
   readonly confirmReplace: boolean;
+  // 'upload' (default): loading a file. 'edit': applying hand-edits made
+  // in the preview pane. Only changes the dialog's title + confirm label.
+  readonly source?: 'upload' | 'edit';
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }
@@ -22,6 +27,7 @@ export function UploadDialog({
   parsed,
   report,
   confirmReplace,
+  source = 'upload',
   onCancel,
   onConfirm,
 }: UploadDialogProps) {
@@ -64,8 +70,14 @@ export function UploadDialog({
             id="upload-dialog-title"
             className="text-base font-semibold text-slate-900"
           >
-            Load configuration from{' '}
-            <span className="font-mono text-[14px] text-slate-700">{fileName}</span>?
+            {source === 'edit' ? (
+              'Apply edited configuration?'
+            ) : (
+              <>
+                Load configuration from{' '}
+                <span className="font-mono text-[14px] text-slate-700">{fileName}</span>?
+              </>
+            )}
           </h2>
         </header>
 
@@ -187,7 +199,7 @@ export function UploadDialog({
               'hover:bg-accent-400 focus:outline-none focus:ring-2 focus:ring-accent-300',
             ].join(' ')}
           >
-            Load
+            {source === 'edit' ? 'Apply' : 'Load'}
           </button>
         </footer>
       </div>

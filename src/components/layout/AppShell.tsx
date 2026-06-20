@@ -21,6 +21,10 @@ export function AppShell() {
   const [showPreview, setShowPreview] = useState(false);
   const [activeTab, setActiveTab] = useState<RightTab>('preview');
   const [wizardOpen, setWizardOpen] = useState(false);
+  // True while the preview pane is in its in-place text-edit mode. Used
+  // to suspend interactions that would clobber or lose the edit buffer
+  // (form edits, tab switch, reset, wizard, upload).
+  const [editing, setEditing] = useState(false);
 
   const onReset = (): void => {
     const ok = window.confirm(
@@ -63,23 +67,26 @@ export function AppShell() {
             <button
               type="button"
               onClick={() => setWizardOpen(true)}
-              disabled={wizardOpen}
+              disabled={wizardOpen || editing}
               className={[
                 'inline-flex items-center gap-1.5 rounded-md border border-accent-500 bg-accent-500 px-3 py-1.5 text-sm font-medium text-white',
                 'hover:bg-accent-600 focus:outline-none focus:ring-2 focus:ring-accent-500',
-                wizardOpen ? 'cursor-not-allowed opacity-60' : '',
+                wizardOpen || editing ? 'cursor-not-allowed opacity-60' : '',
               ].join(' ')}
             >
               <WizardIcon />
               Start wizard…
             </button>
-            <UploadControl />
+            <UploadControl disabled={editing} />
             <button
               type="button"
               onClick={onReset}
+              disabled={editing}
+              title={editing ? 'Finish editing the config text first' : undefined}
               className={[
                 'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700',
                 'hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-accent-500',
+                'disabled:cursor-not-allowed disabled:opacity-50',
               ].join(' ')}
             >
               <ResetIcon />
@@ -97,8 +104,15 @@ export function AppShell() {
             <div className="w-full lg:w-56 lg:shrink-0">
               <SectionNav />
             </div>
-            <div className="flex-1 min-w-0 lg:max-w-[31rem]">
+            <div className="relative flex-1 min-w-0 lg:max-w-[31rem]">
               <FormPane />
+              {editing ? (
+                <div
+                  className="absolute inset-0 z-10 cursor-not-allowed rounded-md bg-slate-50/70"
+                  title="Editing config text — apply or cancel to edit the form"
+                  aria-hidden="true"
+                />
+              ) : null}
             </div>
             <div
               className={[
@@ -121,6 +135,8 @@ export function AppShell() {
                     onClick={() => setActiveTab('graph')}
                     controls="right-pane-graph"
                     icon={<WorkflowGraphIcon />}
+                    disabled={editing}
+                    disabledTitle="Finish editing the config text first"
                   >
                     Workflow graph
                   </TabButton>
@@ -130,7 +146,9 @@ export function AppShell() {
                   role="tabpanel"
                   hidden={activeTab !== 'preview'}
                 >
-                  {activeTab === 'preview' ? <PreviewPane /> : null}
+                  {activeTab === 'preview' ? (
+                    <PreviewPane onEditingChange={setEditing} />
+                  ) : null}
                 </div>
                 <div
                   id="right-pane-graph"
@@ -160,6 +178,8 @@ interface TabButtonProps {
   readonly controls: string;
   readonly icon?: React.ReactNode;
   readonly children: React.ReactNode;
+  readonly disabled?: boolean;
+  readonly disabledTitle?: string;
 }
 
 function WizardIcon() {
@@ -202,7 +222,15 @@ function ResetIcon() {
   );
 }
 
-function TabButton({ isActive, onClick, controls, icon, children }: TabButtonProps) {
+function TabButton({
+  isActive,
+  onClick,
+  controls,
+  icon,
+  children,
+  disabled,
+  disabledTitle,
+}: TabButtonProps) {
   return (
     <button
       type="button"
@@ -210,11 +238,14 @@ function TabButton({ isActive, onClick, controls, icon, children }: TabButtonPro
       aria-selected={isActive}
       aria-controls={controls}
       onClick={onClick}
+      disabled={disabled}
+      title={disabled ? disabledTitle : undefined}
       className={[
         'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-accent-500',
         isActive
           ? 'border-accent-500 bg-accent-500 text-white'
           : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
+        'disabled:cursor-not-allowed disabled:opacity-50',
       ].join(' ')}
     >
       {icon}
