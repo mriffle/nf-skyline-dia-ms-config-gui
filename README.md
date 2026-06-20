@@ -38,7 +38,11 @@ build time. Architecture in three pieces:
   - The **Config preview** runs a pure `emitConfig(state)` function that groups params by
     section, builds a namespace tree, and emits Groovy with section banners and per-param
     comments. Output is byte-stable given fixed version/timestamp so it can be tested with
-    golden files.
+    golden files. The preview is also **editable in place**: an Edit mode swaps the read-only
+    view for a syntax-highlighted text editor, and Apply re-parses your edits back into form
+    state using the same parser that loads an existing `pipeline.config`. Edits round-trip
+    *through state* — on Apply the config is re-canonicalized (comments, ordering, and
+    unrecognized params are regenerated/dropped), so the form stays the single source of truth.
   - The **Workflow graph** runs a pure `computeWorkflowGraph(state)` function that returns
     nodes/edges for the DAG that would actually run given the current form state, rendered
     as a hand-written SVG (no chart library). Unselected branches are omitted entirely
@@ -66,9 +70,9 @@ npm test             # run once
 npm run test:watch   # watch mode
 ```
 
-The suite covers the Groovy emitter (golden files), every cross-field validation rule,
-workflow-graph scenarios, the parameter-coverage gate, the store, and the trickiest UI
-widgets.
+The suite covers the Groovy emitter (golden files), the config parser and parse→emit
+round-trip, every cross-field validation rule, workflow-graph scenarios, the
+parameter-coverage gate, the store, and the trickiest UI widgets.
 
 ## Type checking
 
@@ -110,8 +114,11 @@ npm run preview     # serve dist/ locally to spot-check
 
 ## Deployment
 
-The app is deployed to GitHub Pages by `.github/workflows/deploy.yml` on every push to `main`.
-Tests and type checks run before the build step.
+The app is deployed to GitHub Pages by `.github/workflows/deploy.yml` when a GitHub Release is
+published (or manually via `workflow_dispatch`) — pushes to `main` do **not** deploy, so the
+version is bumped deliberately by cutting a release. The release tag (e.g. `v1.2.3`) supplies the
+version shown in the footer and the generated config header. Tests and type checks run before the
+build step.
 
 **One-time setup:** in the repository settings, set **Settings → Pages → Source** to
 **GitHub Actions**. After the first successful workflow run, the site will be available at
