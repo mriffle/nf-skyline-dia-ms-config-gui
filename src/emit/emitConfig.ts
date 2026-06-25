@@ -26,6 +26,7 @@ import {
 } from '../params/paramMetadata';
 import { sections, type Section } from '../params/sections';
 import { toGroovyLiteral } from './groovyLiteral';
+import { encodeUrlsDeep } from './encodeUrl';
 import {
   buildNamespaceTree,
   freezeTree,
@@ -152,6 +153,25 @@ function normalizeValue(path: string, value: unknown): unknown {
 }
 
 // ---------------------------------------------------------------------------
+// URL encoding
+// ---------------------------------------------------------------------------
+
+// URL-bearing fields whose widget is NOT 'file-or-url' but which still accept a
+// Panorama / web URL. Every 'file-or-url' field is treated as URL-bearing via
+// its widget; these are the exceptions that use other widgets.
+const URL_BEARING_EXTRA_PATHS: ReadonlySet<string> = new Set([
+  'panorama.upload_url',
+  'quant_spectra_dir',
+  'skyline.skyr_file',
+]);
+
+function isUrlBearingPath(path: string): boolean {
+  const meta = paramMetadataByPath[path];
+  if (!meta) return false;
+  return meta.widget === 'file-or-url' || URL_BEARING_EXTRA_PATHS.has(path);
+}
+
+// ---------------------------------------------------------------------------
 // Entry collection
 // ---------------------------------------------------------------------------
 
@@ -173,8 +193,9 @@ function collectEntries(state: FormState): OrderedEntry[] {
     if (info.virtualOnly) return; // UI-only virtuals don't emit
     const value = normalizeValue(path, rawValue);
     if (value === undefined) return;
+    const finalValue = isUrlBearingPath(path) ? encodeUrlsDeep(value) : value;
     seenPaths.add(path);
-    entries.push({ path, value, order: info.order });
+    entries.push({ path, value: finalValue, order: info.order });
   };
 
   // 1. Touched paths.

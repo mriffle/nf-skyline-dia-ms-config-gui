@@ -183,6 +183,30 @@ describe('emitConfig — golden files', () => {
     checkGolden(emit(state), 'escape-edges.config');
   });
 
+  it('percent-encodes URL values (Panorama) but leaves local paths alone', () => {
+    const state = makeState({
+      values: {
+        search_engine: 'diann',
+        // Local path with a space — must NOT be encoded.
+        fasta: '/data/My Lab/db.fasta',
+        // Panorama URL: space -> %20, "@" kept as-is.
+        quant_spectra_dir: {
+          kind: 'single',
+          path: 'https://panoramaweb.org/_webdav/My Lab/@files/run a.raw',
+        },
+        // string-list: URL element encoded, local element untouched.
+        'skyline.skyr_file': [
+          'https://panoramaweb.org/_webdav/A B/report.skyr',
+          '/local/A B/report.skyr',
+        ],
+        // Mixed input: typed space + already-encoded %40 -> single encoded form.
+        'panorama.upload': true,
+        'panorama.upload_url': 'https://panoramaweb.org/_webdav/My Lab/%40files/',
+      },
+    });
+    checkGolden(emit(state), 'url-encoding.config');
+  });
+
   it('preserved outer-scope content (blocks + directives) is appended verbatim after params { }', () => {
     const state: FormState = {
       mode: 'general',

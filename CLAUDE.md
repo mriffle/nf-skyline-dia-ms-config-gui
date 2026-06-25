@@ -72,6 +72,7 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   └── types.ts
     ├── emit/
     │   ├── groovyLiteral.ts            value → Groovy literal
+    │   ├── encodeUrl.ts                percent-encode URL field values (see §6 sub)
     │   ├── namespaceTree.ts            dotted paths → nested block tree
     │   ├── format.ts                   header + indentation helpers
     │   ├── emitConfig.ts               pure: state → string
@@ -342,6 +343,19 @@ correctness boundary in the app. Order of operations:
 1. Filter to touched entries (plus any `alwaysEmit` paths).
 2. Normalize the `quant_spectra_dir` tagged union (`{kind: 'single'|'list'|'batch-map', ...}`)
    to its concrete shape.
+2b. **Percent-encode URL field values** (`encodeUrl.ts`, applied in
+   `collectEntries` after normalization). For URL-bearing fields only —
+   every `file-or-url` widget plus the explicit `URL_BEARING_EXTRA_PATHS`
+   set (`panorama.upload_url`, `quant_spectra_dir`, `skyline.skyr_file`) —
+   each string leaf (also array elements / batch-map values) is run through
+   `encodeUrlValue`. That helper touches a value **only when it has a
+   `scheme://` prefix** (so bare local paths like `/data/My Lab/x.raw` are
+   left exactly as typed) and delegates encoding to the platform `new
+   URL().href`: spaces → `%20`, double-encoding-safe (an existing `%20` /
+   `%40` passes through), `@` and other URL-significant chars kept, and it
+   falls through unchanged on malformed input (the constructor throws). It
+   is idempotent, so parse→emit round-trips are stable. To add a URL field
+   that isn't `file-or-url`, add its path to `URL_BEARING_EXTRA_PATHS`.
 3. Skip *virtual* entries that don't write a real path.
 4. **Group entries by UI section** (in `sections.ts` order). Sections with
    no emitted entries are dropped. Each entry's section comes from either
@@ -1212,6 +1226,7 @@ When you add an `alwaysEmit` field:
 | `checkWellFormedness` (each malformed shape) | YES | Pre-flight gate must not let real syntax errors through |
 | `checkWellFormedness` (emit goldens) | YES     | Regression guard: emitter output must always be well-formed |
 | `checkWellFormedness` outer-block tolerance | YES | Nextflow process selectors, dotted refs, GString in outer blocks must NOT fail the gate |
+| URL percent-encoding (`encodeUrl`)   | YES     | Spaces→%20, no double-encode, local paths untouched |
 | Round-trip (parse → emit) idempotency| YES     | Per emit golden                      |
 | Round-trip byte-stable               | PARTIAL | Only preserved-outer-blocks now — see §9 |
 | Upload UI flow (UploadControl)       | YES     | Button → preview → load → store; both error variants |
@@ -1219,7 +1234,7 @@ When you add an `alwaysEmit` field:
 | CodeEditor overlay                   | YES     | Textarea binding + highlight layer sync; alignment is visual (edit-diag) |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **510 tests across 27 files**. Run `npm test` before pushing.
+Current count: **526 tests across 28 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
