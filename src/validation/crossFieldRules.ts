@@ -8,6 +8,8 @@
 // highlight context when the user clicks the issue.
 
 import type { FormState } from '../params/paramMetadata';
+import type { MetadataTable } from '../metadata/types';
+import { columnValues, variableColumns, replicateNames } from '../metadata/options';
 
 export interface CrossFieldRule {
   readonly id: string;
@@ -492,6 +494,128 @@ const ruleQcReportFormatRequired: CrossFieldRule = {
 };
 
 // ---------------------------------------------------------------------------
+// Metadata membership rules
+// ---------------------------------------------------------------------------
+//
+// These only fire when a sample-metadata table is loaded. Each verifies that
+// a field's selected value(s) still correspond to something in the metadata —
+// a column name, a replicate name, or a value of the control-key column. The
+// picker widgets make valid selection trivial, so in practice these catch
+// stale values carried in from an uploaded config that predates the metadata.
+
+function metadataSelections(value: unknown): string[] {
+  if (typeof value === 'string') return value === '' ? [] : [value];
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === 'string' && v !== '');
+  }
+  return [];
+}
+
+interface MembershipRuleSpec {
+  readonly id: string;
+  readonly path: string;
+  readonly label: string;
+  // Whether the field is active (mirrors its visibleWhen skip gate).
+  readonly active: (s: FormState) => boolean;
+  // The allowed value set given the table + current state.
+  readonly allowed: (table: MetadataTable, s: FormState) => readonly string[];
+  // Extra field ids to highlight alongside `path` when the rule fires.
+  readonly extraFields?: readonly string[];
+}
+
+function membershipRule(spec: MembershipRuleSpec): CrossFieldRule {
+  return {
+    id: spec.id,
+    severity: 'error',
+    check: (s) => {
+      const table = s.metadata;
+      if (!table) return null;
+      if (!spec.active(s)) return null;
+      const selected = metadataSelections(s.values[spec.path]);
+      if (selected.length === 0) return null;
+      const allowed = new Set(spec.allowed(table, s));
+      const bad = selected.filter((v) => !allowed.has(v));
+      if (bad.length === 0) return null;
+      const quoted = bad.map((b) => `"${b}"`).join(', ');
+      return {
+        message: `${spec.label}: ${quoted} ${
+          bad.length === 1 ? 'is' : 'are'
+        } not present in the uploaded metadata.`,
+        fields: [spec.path, ...(spec.extraFields ?? [])],
+      };
+    },
+  };
+}
+
+const qcActive = (s: FormState): boolean => s.values['qc_report.skip'] !== true;
+const batchActive = (s: FormState): boolean => s.values['batch_report.skip'] !== true;
+
+// 20-26. Metadata membership rules.
+const ruleMetadataColorVars = membershipRule({
+  id: 'metadata-color-vars-valid',
+  path: 'qc_report.color_vars',
+  label: 'PCA color variables',
+  active: qcActive,
+  allowed: (t) => variableColumns(t),
+});
+
+const ruleMetadataExcludeReplicates = membershipRule({
+  id: 'metadata-exclude-replicates-valid',
+  path: 'qc_report.exclude_replicates',
+  label: 'Exclude replicates',
+  active: qcActive,
+  allowed: (t) => replicateNames(t),
+});
+
+const ruleMetadataBatch1 = membershipRule({
+  id: 'metadata-batch1-valid',
+  path: 'batch_report.batch1',
+  label: 'Batch variable 1',
+  active: batchActive,
+  allowed: (t) => variableColumns(t),
+});
+
+const ruleMetadataBatch2 = membershipRule({
+  id: 'metadata-batch2-valid',
+  path: 'batch_report.batch2',
+  label: 'Batch variable 2',
+  active: batchActive,
+  allowed: (t) => variableColumns(t),
+});
+
+const ruleMetadataCovariateVars = membershipRule({
+  id: 'metadata-covariate-vars-valid',
+  path: 'batch_report.covariate_vars',
+  label: 'Covariate variables',
+  active: batchActive,
+  allowed: (t) => variableColumns(t),
+});
+
+const ruleMetadataControlKey = membershipRule({
+  id: 'metadata-control-key-valid',
+  path: 'batch_report.control_key',
+  label: 'Control key',
+  active: batchActive,
+  allowed: (t) => variableColumns(t),
+});
+
+// Control values are checked against the values of the control-key column.
+// When the control key isn't a valid column, the control-key rule reports
+// that; here we simply skip (empty allowed set short-circuits via active).
+const ruleMetadataControlValues = membershipRule({
+  id: 'metadata-control-values-valid',
+  path: 'batch_report.control_values',
+  label: 'Control values',
+  active: (s) => {
+    if (!batchActive(s)) return false;
+    const key = s.values['batch_report.control_key'];
+    return typeof key === 'string' && key !== '';
+  },
+  allowed: (t, s) => columnValues(t, s.values['batch_report.control_key'] as string),
+  extraFields: ['batch_report.control_key'],
+});
+
+// ---------------------------------------------------------------------------
 // Ordered rule list
 // ---------------------------------------------------------------------------
 
@@ -515,4 +639,11 @@ export const crossFieldRules: readonly CrossFieldRule[] = Object.freeze([
   rulePanoramaImportPrereqs,
   ruleVendorRawEngine,
   ruleQcReportFormatRequired,
+  ruleMetadataColorVars,
+  ruleMetadataExcludeReplicates,
+  ruleMetadataBatch1,
+  ruleMetadataBatch2,
+  ruleMetadataCovariateVars,
+  ruleMetadataControlKey,
+  ruleMetadataControlValues,
 ]);

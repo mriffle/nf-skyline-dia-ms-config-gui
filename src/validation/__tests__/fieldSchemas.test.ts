@@ -14,16 +14,29 @@ describe('validateField — text / file-or-url', () => {
     expect(validateField(metaFor('pdc.study_id'), 'PDC000123')).toBeUndefined();
   });
 
-  it('rejects empty string for text', () => {
-    expect(validateField(metaFor('pdc.study_id'), '')).toBeDefined();
+  it('rejects empty string for text when the field is required', () => {
+    expect(validateField(metaFor('pdc.study_id'), '', true)).toBeDefined();
+  });
+
+  it('accepts empty string for text when the field is optional', () => {
+    // A field the user typed into and then cleared must not read as
+    // required when requiredWhen does not fire for the current state.
+    expect(validateField(metaFor('pdc.study_id'), '')).toBeUndefined();
   });
 
   it('accepts a non-empty string for file-or-url', () => {
     expect(validateField(metaFor('fasta'), '/db/proteins.fasta')).toBeUndefined();
   });
 
-  it('rejects empty string for file-or-url', () => {
-    expect(validateField(metaFor('fasta'), '')).toBeDefined();
+  it('rejects empty string for file-or-url when the field is required', () => {
+    expect(validateField(metaFor('fasta'), '', true)).toBeDefined();
+  });
+
+  it('accepts empty string for file-or-url when the field is optional', () => {
+    // Repro of the cleared-optional-field bug: clearing an optional
+    // file-or-url (e.g. chromatogram_library_spectra_dir) must not
+    // surface a "Required." error.
+    expect(validateField(metaFor('chromatogram_library_spectra_dir'), '')).toBeUndefined();
   });
 
   it('rejects wrong type for text (number)', () => {
@@ -112,7 +125,7 @@ describe('validateField — enum', () => {
     // carafe.source has widget=enum but no schema entry; the schema
     // falls back to non-empty string.
     expect(validateField(metaFor('carafe.source'), 'file')).toBeUndefined();
-    expect(validateField(metaFor('carafe.source'), '')).toBeDefined();
+    expect(validateField(metaFor('carafe.source'), '', true)).toBeDefined();
   });
 });
 

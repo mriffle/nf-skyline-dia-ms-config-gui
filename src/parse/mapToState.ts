@@ -276,7 +276,10 @@ function coerceStringOrList(
   meta: ParamMeta | undefined,
   line: number,
 ): CoerceResult {
-  const wantsList = meta?.widget === 'string-list' || meta?.widget === 'multi-enum';
+  const wantsList =
+    meta?.widget === 'string-list' ||
+    meta?.widget === 'multi-enum' ||
+    meta?.widget === 'metadata-multi';
   if (typeof rawValue === 'string') {
     if (wantsList) {
       return {

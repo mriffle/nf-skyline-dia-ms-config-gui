@@ -23,7 +23,8 @@ export function runValidation(state: FormState): ValidationReport {
     if (!isVisible(meta, state)) continue;
     if (state.touched[meta.path] !== true) continue;
     if (!(meta.path in state.values)) continue;
-    const msg = validateField(meta, state.values[meta.path]);
+    const required = meta.requiredWhen ? meta.requiredWhen(state) : false;
+    const msg = validateField(meta, state.values[meta.path], required);
     if (msg !== undefined) {
       fieldErrors[meta.path] = msg;
     }

@@ -5,6 +5,8 @@
 
 import { schemaDerived } from './schemaDerived.generated';
 import type { SchemaDerivedEntry } from './schemaTypes';
+import type { MetadataTable } from '../metadata/types';
+import type { MetadataSource } from '../metadata/options';
 
 export type Mode = 'general' | 'pdc';
 
@@ -17,6 +19,14 @@ export interface FormState {
   // params { } block on emit. Empty / absent when nothing was uploaded
   // or after a Reset.
   readonly preservedOuterText?: string;
+  // Cleaned, validated sample-metadata table uploaded via "Load
+  // metadata…". A pure GUI artifact: it drives metadata-aware form
+  // pickers + cross-field validation and is NEVER emitted into the
+  // generated config (emit reads only mode/values/touched/
+  // preservedOuterText). Independent of any config upload — orthogonal
+  // artifacts that coexist. Absent until the user uploads metadata; wiped
+  // on Reset.
+  readonly metadata?: MetadataTable;
 }
 
 export type Widget =
@@ -30,7 +40,12 @@ export type Widget =
   | 'string-list'
   | 'glob-regex-pair'
   | 'batch-map'
-  | 'spectra-source';
+  | 'spectra-source'
+  // Metadata-aware pickers. When a metadata table is loaded they offer a
+  // constrained select (single) / checkbox group (multi) sourced from the
+  // table; otherwise they fall back to a free-text input / chip list.
+  | 'metadata-single'
+  | 'metadata-multi';
 
 export type SectionId =
   | 'essentials'
@@ -63,6 +78,11 @@ export interface ParamMeta {
   readonly group?: string;
   readonly virtual?: boolean;
   readonly affects?: readonly string[];
+  // For metadata-single / metadata-multi widgets: which aspect of the
+  // uploaded metadata table supplies this field's options (column names,
+  // replicate names, or the values of the control-key column). Ignored
+  // when no metadata is loaded (the widget falls back to free text).
+  readonly metadataSource?: MetadataSource;
   // Override the schema's default value for UI display only (placeholder +
   // "Default: X" hint). Use sparingly — only when the upstream
   // nextflow_schema.json default disagrees with the workflow's actual
@@ -830,7 +850,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     label: 'Exclude replicates',
     help: 'Replicate names to exclude from normalization and batch correction.',
     tier: 'advanced',
-    widget: 'string-list',
+    widget: 'metadata-multi',
+    metadataSource: 'replicates',
     visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
@@ -860,7 +881,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     label: 'PCA color variables',
     help: 'Metadata variables used to color the QC PCA plots. Leave blank to not color the PCA plots.',
     tier: 'common',
-    widget: 'string-list',
+    widget: 'metadata-multi',
+    metadataSource: 'columns',
     visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',
   },
@@ -909,7 +931,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     label: 'Batch variable 1',
     help: 'Replicate-metadata key for the first batch level. Falls back to the project name when unset.',
     tier: 'advanced',
-    widget: 'text',
+    widget: 'metadata-single',
+    metadataSource: 'columns',
     visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
@@ -919,7 +942,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     label: 'Batch variable 2',
     help: 'Replicate-metadata key for the second batch level.',
     tier: 'advanced',
-    widget: 'text',
+    widget: 'metadata-single',
+    metadataSource: 'columns',
     visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
@@ -929,7 +953,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     label: 'Covariate variables',
     help: 'Replicate-metadata keys used as covariates for batch correction.',
     tier: 'advanced',
-    widget: 'string-list',
+    widget: 'metadata-multi',
+    metadataSource: 'columns',
     visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
@@ -939,7 +964,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     label: 'Control key',
     help: 'Replicate-metadata key indicating control replicates for CV-distribution plots.',
     tier: 'advanced',
-    widget: 'text',
+    widget: 'metadata-single',
+    metadataSource: 'columns',
     visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },
@@ -949,7 +975,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     label: 'Control values',
     help: 'Values of the control key marking a replicate as a control.',
     tier: 'advanced',
-    widget: 'string-list',
+    widget: 'metadata-multi',
+    metadataSource: 'control-values',
     visibleWhen: (s) => s.values['batch_report.skip'] !== true,
     group: 'Batch report',
   },

@@ -67,7 +67,7 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   └── store.ts                    Zustand store + persist middleware
     ├── validation/
     │   ├── fieldSchemas.ts             Zod schemas per widget kind
-    │   ├── crossFieldRules.ts          19 hand-authored cross-field rules
+    │   ├── crossFieldRules.ts          26 hand-authored cross-field rules
     │   ├── runValidation.ts            entry point: state → ValidationReport
     │   └── types.ts
     ├── emit/
@@ -86,17 +86,27 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   ├── loadPipeline.ts             shared text→outcome pipeline (gate→parse→map);
     │   │                               used by upload AND editable preview — see §11
     │   └── mapToState.ts               entries → FormState + UploadReport
+    ├── metadata/                        sample-metadata upload — see Architecture §12
+    │   ├── types.ts                    MetadataTable, MetadataError/Warning, format
+    │   ├── parseDelimited.ts           hand-rolled RFC-4180-ish CSV/TSV parser
+    │   ├── validateMetadata.ts         detect format → parse → clean → table+warnings
+    │   ├── serializeMetadata.ts        inverse: MetadataTable → CSV/TSV text (download)
+    │   └── options.ts                  derive columns / replicates / control-values;
+    │                                   shared by picker widgets AND validation rules
     ├── components/
-    │   ├── layout/                     AppShell (hosts Preview/Workflow tabs + Wizard overlay),
+    │   ├── layout/                     AppShell (hosts Preview/Workflow/Metadata tabs + Wizard overlay),
     │   │                               SectionNav, FormPane
     │   ├── form/                       Section, Field, FieldShell, HelpPopover,
     │   │                               AdvancedToggle, ValidationSummary
-    │   ├── widgets/                    10 widgets — see "Widget catalog" below
+    │   ├── widgets/                    12 widgets — see "Widget catalog" below
     │   ├── preview/                    PreviewPane (read-only view + in-place text editor),
     │   │                               GroovyHighlighter (+ highlightTokens helper),
     │   │                               CodeEditor (highlighted overlay editor),
     │   │                               PreviewActions — see §11
     │   ├── workflow/                   WorkflowGraphPane, WorkflowGraphSvg (live DAG render)
+    │   ├── metadata/                   MetadataPane (spreadsheet + download/clear),
+    │   │                               UploadMetadataControl, MetadataUploadDialog,
+    │   │                               MetadataErrorDialog — see §12
     │   ├── upload/                     UploadControl, UploadDialog, UploadErrorDialog
     │   ├── wizard/                     Wizard, WizardChrome, WizardRadioCards,
     │   │                               WizardAdvancedSection, flow.ts, screens/*
@@ -230,6 +240,7 @@ StoreState = {
   values: Record<string, unknown>,
   touched: Record<string, boolean>,
   preservedOuterText?: string,   // see §9 — verbatim outer blocks from upload
+  metadata?: MetadataTable,      // see §12 — uploaded sample-metadata table
   showAdvanced: boolean,
   activeSection: SectionId | null,
   storeVersion: <CURRENT_STORE_VERSION>,
@@ -237,7 +248,8 @@ StoreState = {
 ```
 
 Actions: `setValue`, `clearValue`, `setMode`, `toggleAdvanced`,
-`setShowAdvanced`, `setActiveSection`, `reset`. Mode-change clearing logic
+`setShowAdvanced`, `setActiveSection`, `reset`, `loadFromConfig`,
+`loadMetadata`, `clearMetadata`. Mode-change clearing logic
 evaluates every `paramMeta.visibleWhen` against old vs. new state and clears
 paths that would become invisible.
 
@@ -268,7 +280,7 @@ paths that would become invisible.
 
 If you change what's pre-seeded, bump `CURRENT_STORE_VERSION` so the
 `persist.migrate` step resets stale browser drafts to the new default.
-(Currently `7`.)
+(Currently `8` — v8 added the persisted `metadata` table; see §12.)
 
 ### 4. Emit-only-touched invariant (DO NOT BREAK)
 
@@ -335,10 +347,12 @@ Two layers, both running on every state change:
 
 1. **Per-widget Zod schemas** (`fieldSchemas.ts`) — applied only to *visible*
    and *touched* fields. Type-shape correctness.
-2. **Hand-rolled cross-field rules** (`crossFieldRules.ts`) — 19 rules, each
+2. **Hand-rolled cross-field rules** (`crossFieldRules.ts`) — 26 rules, each
    with `id`, `severity: 'error' | 'warning'`, and a `check(state)` returning
    `null` or `{ message, fields }`. Rule IDs are stable and referenced by
-   tests.
+   tests. Rules 20-26 are the metadata-membership rules (`metadata-*-valid`):
+   they no-op unless a metadata table is loaded, then error if a selected
+   value isn't a column / replicate / control-value present in it — see §12.
 
 `runValidation(state) → ValidationReport`. The download / copy buttons
 gate on `report.isDownloadable` (no error-severity issues anywhere).
@@ -410,9 +424,10 @@ must regenerate every golden — a tiny temporary test that writes
 
 ### 7. Workflow graph (live DAG visualization)
 
-The right column of the app exposes two tabs: **Config preview** (the Groovy
-override emitter, default tab) and **Workflow graph** (an SVG visualization
-of the Nextflow DAG that *would actually run* given the current form state).
+The right column of the app exposes three tabs: **Config preview** (the Groovy
+override emitter, default tab), **Workflow graph** (an SVG visualization
+of the Nextflow DAG that *would actually run* given the current form state),
+and **Metadata** (the uploaded sample-metadata spreadsheet — see §12).
 
 Architecture mirrors the emitter:
 
@@ -431,9 +446,12 @@ Architecture mirrors the emitter:
   intrinsic content height (don't change to `h-full` — that reintroduces a
   large empty whitespace gap below the graph since unlike PreviewPane the SVG
   has a fixed natural height).
-- **`AppShell.tsx`** owns the active-tab state (`'preview' | 'workflow'`,
-  defaults to `'preview'`). The mobile show/hide toggle wraps the entire
-  tabbed area, preserving prior behavior.
+- **`AppShell.tsx`** owns the active-tab state
+  (`'preview' | 'graph' | 'metadata'`, defaults to `'preview'`; the third
+  Metadata tab is §12). The mobile show/hide toggle wraps the entire tabbed
+  area, preserving prior behavior. All non-preview tabs are disabled while
+  the preview is in edit mode (they'd unmount `PreviewPane` and lose the
+  buffer).
 
 **Active-only graph**: only nodes that will actually run / be consumed are
 emitted. Unselected branches (the other search engines, FASTA in Cascadia
@@ -537,9 +555,19 @@ Each widget is a memoized React component receiving `WidgetProps`:
 | `glob-regex-pair`     | virtual — pairs `*_glob` + `*_regex` mutex'd      |
 | `batch-map`           | virtual — list of `{name, path}` rows             |
 | `spectra-source`      | virtual — radio for single / list / batch-map     |
+| `metadata-single`     | `MetadataSingleSelect` — select when metadata loaded, else `TextInput` |
+| `metadata-multi`      | `MetadataMultiSelect` — checkbox group when loaded, else `StringListInput` |
 
 Virtual widgets have `virtual: true` and list real schema paths in `affects`
 so the coverage test sees them as accounted for.
+
+The two `metadata-*` widgets carry a `metadataSource: 'columns' |
+'replicates' | 'control-values'` on their `ParamMeta` and read
+`store.metadata` to source options; with no table loaded they delegate to
+the free-text widget (their pre-metadata behavior). They store the same
+value shapes as `text` / `string-list`, so emit and the round-trip are
+unaffected. `metadata-multi` is in the list-storing-widget set in
+`mapToState.ts` (alongside `string-list` / `multi-enum`). See §12.
 
 ### 9. Config upload (parse → state restoration)
 
@@ -993,6 +1021,65 @@ truth.
       context) paints over it and washes it out. Fix: both dialogs are
       `createPortal`'d to `document.body`.
 
+### 12. Sample-metadata upload (CSV/TSV)
+
+An optional, **GUI-only** feature: users upload a sample-metadata table
+(one column per metadata field, one row per sample) via "Load metadata…"
+in the header. It is **never emitted into the config** — it drives
+metadata-aware form pickers + cross-field validation and can be
+re-downloaded after cleaning. Independent of (and coexists with) the
+config-upload feature (§9); loading a config preserves loaded metadata and
+vice versa.
+
+**Core modules** (`src/metadata/`, app-agnostic except `options.ts`):
+- `parseDelimited.ts` — hand-rolled RFC-4180-ish parser → grid of fields
+  (handles quoting, embedded delimiters/newlines, CRLF, BOM). Only lexical
+  error it raises is an unterminated quoted field; structural checks live
+  in the validator. Quotes are special only at field start (lenient).
+- `validateMetadata.ts` — `detectFormat` (extension, else sniff tabs vs
+  commas in the header) → parse → structural checks → clean table +
+  warnings. **Rejects** (errors, no table loads): empty file, header-only
+  (no data rows), ragged rows, empty/duplicate column names, no/ambiguous
+  `Replicate` column. **Cleans + warns** (table still loads): trims every
+  header/cell (warn with sample list), moves a non-first `Replicate` column
+  to the front, normalizes `Replicate` casing (case-insensitive match), and
+  flags duplicate replicate names. Errors carry a source-line snippet where
+  applicable.
+- `serializeMetadata.ts` — inverse of the parser; renders the **cleaned**
+  table back to CSV/TSV in its original `format` with RFC-4180 quoting.
+  `parse(serialize(table))` round-trips. Used by the Download button.
+- `options.ts` — `variableColumns` (all columns except `Replicate`),
+  `replicateNames`, `columnValues`, and `optionsForSource(table, source,
+  controlKey?)`. **Single source of truth** shared by the picker widgets
+  and the validation rules.
+
+**Data model**: `MetadataTable = { fileName, format: 'csv'|'tsv',
+columns: string[] (Replicate first, unique), rows: Record<col,string>[] }`.
+Stored as the optional `metadata` field on `FormState` (so cross-field
+rules read `s.metadata`), persisted (store v8), wiped on Reset (explicit
+`metadata: undefined` — same Zustand-merge gotcha as `preservedOuterText`).
+Actions: `loadMetadata` / `clearMetadata`. Emit + parse ignore it entirely.
+
+**UI**:
+- `UploadMetadataControl` (header button, mirrors `UploadControl`:
+  FileReader, dialog lifecycle) → `MetadataUploadDialog` (confirm + warning
+  summary) or `MetadataErrorDialog` (snippet errors, **no** import-anyway
+  bypass). On confirm → `loadMetadata` + auto-switch to the Metadata tab.
+- `MetadataPane` (third right-pane tab) — sticky-header / sticky-first-col
+  spreadsheet, Download + Clear actions, empty-state prompt.
+
+**Metadata-driven fields**: seven `qc_report.*` / `batch_report.*` fields
+use the `metadata-single` / `metadata-multi` widgets with a `metadataSource`
+(see §8). They drive: PCA color vars + covariate vars + batch1/batch2 +
+control key (`columns`), exclude replicates (`replicates`), control values
+(`control-values` — the distinct values of whatever column `control_key`
+names). With no table loaded they're free text (unchanged). The
+`metadata-*-valid` cross-field rules (§5, rules 20-26) enforce membership
+**only when a table is loaded** (error severity, gated on the relevant
+`*.skip`), so a stale value from an uploaded config blocks download. The
+wizard's QC/batch screens render these via `<Field>`, so the pickers light
+up there automatically — no wizard changes.
+
 ## Hard rules / invariants
 
 1. **Emit only touched paths.** Never auto-write defaults into state.
@@ -1161,6 +1248,12 @@ When you add an `alwaysEmit` field:
 - **Mode toggle in tests**: prefer `useStore.getState().setMode('pdc')`
   directly. The UI toggle path goes through `window.confirm`, which jsdom
   defaults to returning false on.
+- **`metadata` leaks across tests via `setState`.** Zustand's
+  `useStore.setState(createDefaultState())` *merges*, and
+  `createDefaultState()` has no `metadata` key — so a table loaded by one
+  test survives into the next. Reset it explicitly in `beforeEach`:
+  `useStore.setState({ ...createDefaultState(), metadata: undefined })`
+  (same gotcha the real `reset` action handles).
 - **The `quant_spectra_dir` value is a tagged union**, not a plain string.
   Always one of `{kind: 'single', path}`, `{kind: 'list', paths}`, or
   `{kind: 'batch-map', entries}`. The emitter normalizes this to the
@@ -1244,9 +1337,12 @@ When you add an `alwaysEmit` field:
 | Upload UI flow (UploadControl)       | YES     | Button → preview → load → store; both error variants |
 | Editable preview (PreviewPane)       | YES     | Edit→Apply round-trip: clean / notices-confirm / syntax-reject / cancel |
 | CodeEditor overlay                   | YES     | Textarea binding + highlight layer sync; alignment is visual (edit-diag) |
+| Metadata parse/validate/serialize    | YES     | Delimiter sniff, quotes, trim/dedup/Replicate-first, round-trip — §12 |
+| Metadata picker widgets + pane       | YES     | Free-text fallback vs constrained picker; spreadsheet + download/clear |
+| Metadata membership rules            | YES     | One firing + one silent per `metadata-*-valid` rule |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **532 tests across 28 files**. Run `npm test` before pushing.
+Current count: **606 tests across 32 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff

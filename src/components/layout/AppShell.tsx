@@ -9,12 +9,14 @@ import { SectionNav } from './SectionNav';
 import { FormPane } from './FormPane';
 import { PreviewPane } from '../preview/PreviewPane';
 import { WorkflowGraphPane } from '../workflow/WorkflowGraphPane';
+import { MetadataPane } from '../metadata/MetadataPane';
 import { UploadControl } from '../upload/UploadControl';
+import { UploadMetadataControl } from '../metadata/UploadMetadataControl';
 import { Wizard } from '../wizard/Wizard';
 
 declare const __APP_VERSION__: string;
 
-type RightTab = 'preview' | 'graph';
+type RightTab = 'preview' | 'graph' | 'metadata';
 
 export function AppShell() {
   const reset = useStore((s) => s.reset);
@@ -78,6 +80,13 @@ export function AppShell() {
               Start wizard…
             </button>
             <UploadControl disabled={editing} />
+            <UploadMetadataControl
+              disabled={editing}
+              onLoaded={() => {
+                setActiveTab('metadata');
+                setShowPreview(true);
+              }}
+            />
             <button
               type="button"
               onClick={onReset}
@@ -140,6 +149,16 @@ export function AppShell() {
                   >
                     Workflow graph
                   </TabButton>
+                  <TabButton
+                    isActive={activeTab === 'metadata'}
+                    onClick={() => setActiveTab('metadata')}
+                    controls="right-pane-metadata"
+                    icon={<MetadataTabIcon />}
+                    disabled={editing}
+                    disabledTitle="Finish editing the config text first"
+                  >
+                    Metadata
+                  </TabButton>
                 </div>
                 <div
                   id="right-pane-preview"
@@ -156,6 +175,13 @@ export function AppShell() {
                   hidden={activeTab !== 'graph'}
                 >
                   {activeTab === 'graph' ? <WorkflowGraphPane /> : null}
+                </div>
+                <div
+                  id="right-pane-metadata"
+                  role="tabpanel"
+                  hidden={activeTab !== 'metadata'}
+                >
+                  {activeTab === 'metadata' ? <MetadataPane /> : null}
                 </div>
               </div>
             </div>
@@ -272,6 +298,27 @@ function ConfigPreviewIcon() {
       <path d="M11 2.75V6.5H15" />
       <path d="m8.25 10.5-1.5 1.75 1.5 1.75" />
       <path d="m11.75 10.5 1.5 1.75-1.5 1.75" />
+    </svg>
+  );
+}
+
+function MetadataTabIcon() {
+  // Spreadsheet grid — evokes the tabular metadata view.
+  return (
+    <svg
+      aria-hidden="true"
+      width="20"
+      height="20"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="14" height="12" rx="1.2" />
+      <path d="M3 8h14" />
+      <path d="M8 8v8" />
     </svg>
   );
 }

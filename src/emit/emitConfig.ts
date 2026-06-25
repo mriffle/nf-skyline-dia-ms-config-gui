@@ -152,6 +152,18 @@ function normalizeValue(path: string, value: unknown): unknown {
   return value;
 }
 
+// "Empty" in the emit sense: an empty string, empty list, or empty map —
+// the shapes a scalar / list / batch-map widget leaves behind when the
+// user clears it. null / false / 0 are real values and are NOT empty.
+function isEmptyEmitValue(value: unknown): boolean {
+  if (value === '') return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (value !== null && typeof value === 'object') {
+    return Object.keys(value as Record<string, unknown>).length === 0;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // URL encoding
 // ---------------------------------------------------------------------------
@@ -186,13 +198,18 @@ function collectEntries(state: FormState): OrderedEntry[] {
   // it silently.
   const generatesProfile = !hasPreservedProfilesBlock(state.preservedOuterText);
 
-  const consider = (path: string, rawValue: unknown): void => {
+  const consider = (path: string, rawValue: unknown, dropEmpty: boolean): void => {
     if (seenPaths.has(path)) return;
     if (generatesProfile && PROFILE_PARAM_PATHS.has(path)) return; // in the profile block
     const info = infoForPath(path);
     if (info.virtualOnly) return; // UI-only virtuals don't emit
     const value = normalizeValue(path, rawValue);
     if (value === undefined) return;
+    // A touched-but-empty value means the user typed something and then
+    // cleared it — treat it as unset and don't emit it. alwaysEmit paths
+    // pass dropEmpty=false so a deliberate empty override (e.g. clearing
+    // carafe.cli_options) still round-trips.
+    if (dropEmpty && isEmptyEmitValue(value)) return;
     const finalValue = isUrlBearingPath(path) ? encodeUrlsDeep(value) : value;
     seenPaths.add(path);
     entries.push({ path, value: finalValue, order: info.order });
@@ -202,7 +219,7 @@ function collectEntries(state: FormState): OrderedEntry[] {
   for (const [path, isTouched] of Object.entries(state.touched)) {
     if (isTouched !== true) continue;
     if (!(path in state.values)) continue;
-    consider(path, state.values[path]);
+    consider(path, state.values[path], true);
   }
 
   // 2. AlwaysEmit paths. Value from state.values if present (even untouched —
@@ -213,7 +230,7 @@ function collectEntries(state: FormState): OrderedEntry[] {
     if (seenPaths.has(meta.path)) continue;
     const rawValue =
       meta.path in state.values ? state.values[meta.path] : getEffectiveDefault(meta);
-    consider(meta.path, rawValue);
+    consider(meta.path, rawValue, false);
   }
 
   entries.sort((a, b) => {

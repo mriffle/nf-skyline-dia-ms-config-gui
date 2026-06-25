@@ -19,7 +19,8 @@ export interface StoreState extends FormState {
 //       round-trip support.
 //   v7: qc_report.report_format pre-seeded to ['html'] (paired with
 //       defaultOverride + alwaysEmit) so QC reports default to HTML only.
-export const CURRENT_STORE_VERSION = 7;
+//   v8: metadata (uploaded sample-metadata table) added to persisted state.
+export const CURRENT_STORE_VERSION = 8;
 
 export const createDefaultState = (): StoreState => ({
   mode: 'general',

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Mode, SectionId } from '../params/paramMetadata';
 import { paramMetadata, type FormState } from '../params/paramMetadata';
+import type { MetadataTable } from '../metadata/types';
 import {
   CURRENT_STORE_VERSION,
   createDefaultState,
@@ -23,6 +24,10 @@ export interface StoreActions {
   // for its target mode. Layers loaded values on top of createDefaultState
   // seeds so paths the file doesn't mention still read as defaults.
   loadFromConfig: (loaded: FormState) => void;
+  // Store / clear the uploaded sample-metadata table. Orthogonal to the
+  // config — does not touch values/touched/mode.
+  loadMetadata: (table: MetadataTable) => void;
+  clearMetadata: () => void;
 }
 
 export type Store = StoreState & StoreActions;
@@ -102,9 +107,15 @@ export const useStore = create<Store>()(
       setActiveSection: (id) => set({ activeSection: id }),
 
       // Zustand's set merges with current state, so we must explicitly
-      // clear preservedOuterText (which isn't a field on createDefaultState)
-      // to ensure an uploaded outer-block bundle gets wiped on Reset.
-      reset: () => set({ ...createDefaultState(), preservedOuterText: undefined }),
+      // clear preservedOuterText and metadata (neither is a field on
+      // createDefaultState) to ensure an uploaded outer-block bundle and
+      // any loaded metadata get wiped on Reset.
+      reset: () =>
+        set({
+          ...createDefaultState(),
+          preservedOuterText: undefined,
+          metadata: undefined,
+        }),
 
       loadFromConfig: (loaded) => {
         const baseline = createDefaultState();
@@ -115,10 +126,15 @@ export const useStore = create<Store>()(
           preservedOuterText: loaded.preservedOuterText,
           // Reset transient navigation so the form scrolls to the top.
           // showAdvanced is intentionally preserved — it's a UI density
-          // preference, not config state.
+          // preference, not config state. metadata is intentionally NOT
+          // set here: it's orthogonal to the config and survives a config
+          // load (Zustand merges, preserving the existing field).
           activeSection: null,
         });
       },
+
+      loadMetadata: (table) => set({ metadata: table }),
+      clearMetadata: () => set({ metadata: undefined }),
     }),
     {
       name: STORAGE_KEY,
@@ -129,6 +145,7 @@ export const useStore = create<Store>()(
         values: s.values,
         touched: s.touched,
         preservedOuterText: s.preservedOuterText,
+        metadata: s.metadata,
         showAdvanced: s.showAdvanced,
         activeSection: s.activeSection,
         storeVersion: s.storeVersion,

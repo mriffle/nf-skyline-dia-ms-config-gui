@@ -266,6 +266,59 @@ describe('localStorage persistence', () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!);
     expect(parsed.state.values.fasta).toBe('/persisted.fasta');
-    expect(parsed.version).toBe(7);
+    expect(parsed.version).toBe(8);
+  });
+});
+
+describe('metadata', () => {
+  const table = {
+    fileName: 'm.csv',
+    format: 'csv' as const,
+    columns: ['Replicate', 'Batch'],
+    rows: [{ Replicate: 'S1', Batch: 'B1' }],
+  };
+
+  it('loadMetadata stores the table; clearMetadata removes it', () => {
+    const { loadMetadata, clearMetadata } = useStore.getState();
+    loadMetadata(table);
+    expect(useStore.getState().metadata).toEqual(table);
+    clearMetadata();
+    expect(useStore.getState().metadata).toBeUndefined();
+  });
+
+  it('reset clears the loaded metadata', () => {
+    const { loadMetadata, reset } = useStore.getState();
+    loadMetadata(table);
+    reset();
+    expect(useStore.getState().metadata).toBeUndefined();
+  });
+
+  it('loadFromConfig preserves loaded metadata (orthogonal artifacts)', () => {
+    const { loadMetadata, loadFromConfig } = useStore.getState();
+    loadMetadata(table);
+    loadFromConfig({
+      mode: 'general',
+      values: { fasta: '/db.fasta' },
+      touched: { fasta: true },
+    });
+    expect(useStore.getState().metadata).toEqual(table);
+  });
+
+  it('does not change values/touched/mode', () => {
+    const { setValue, loadMetadata } = useStore.getState();
+    setValue('fasta', '/db.fasta');
+    loadMetadata(table);
+    const s = useStore.getState();
+    expect(s.values['fasta']).toBe('/db.fasta');
+    expect(s.touched['fasta']).toBe(true);
+    expect(s.mode).toBe('general');
+  });
+
+  it('persists metadata to localStorage', async () => {
+    useStore.getState().loadMetadata(table);
+    await new Promise((r) => setTimeout(r, 0));
+    const raw = localStorage.getItem('nf-skyline-dia-ms.config-builder.v1');
+    const parsed = JSON.parse(raw!);
+    expect(parsed.state.metadata).toEqual(table);
   });
 });

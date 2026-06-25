@@ -20,6 +20,8 @@ import { StringListInput } from '../widgets/StringListInput';
 import { GlobRegexPair } from '../widgets/GlobRegexPair';
 import { SpectraSourceRadio } from '../widgets/SpectraSourceRadio';
 import { BatchMapBuilder } from '../widgets/BatchMapBuilder';
+import { MetadataSingleSelect } from '../widgets/MetadataSingleSelect';
+import { MetadataMultiSelect } from '../widgets/MetadataMultiSelect';
 import type { WidgetProps } from '../widgets/types';
 
 interface FieldProps {
@@ -102,6 +104,10 @@ function renderWidget(props: WidgetProps) {
         : [];
       return <StringListInput {...props} value={items} />;
     }
+    case 'metadata-single':
+      return <MetadataSingleSelect {...props} />;
+    case 'metadata-multi':
+      return <MetadataMultiSelect {...props} />;
     case 'glob-regex-pair':
       return <GlobRegexPair {...props} />;
     case 'spectra-source':

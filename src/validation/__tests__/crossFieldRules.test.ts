@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { FormState, Mode } from '../../params/paramMetadata';
+import type { MetadataTable } from '../../metadata/types';
 import { crossFieldRules, type CrossFieldRule } from '../crossFieldRules';
 
 // ---------------------------------------------------------------------------
@@ -918,8 +919,8 @@ describe('rule: qc-report-format-required', () => {
 // ---------------------------------------------------------------------------
 
 describe('crossFieldRules list', () => {
-  it('contains exactly 19 rules', () => {
-    expect(crossFieldRules.length).toBe(19);
+  it('contains exactly 26 rules', () => {
+    expect(crossFieldRules.length).toBe(26);
   });
 
   it('has unique rule IDs', () => {
@@ -931,5 +932,216 @@ describe('crossFieldRules list', () => {
     for (const r of crossFieldRules) {
       expect(['error', 'warning']).toContain(r.severity);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 20-26. Metadata membership rules
+// ---------------------------------------------------------------------------
+
+const META: MetadataTable = {
+  fileName: 'm.csv',
+  format: 'csv',
+  columns: ['Replicate', 'Batch', 'Condition'],
+  rows: [
+    { Replicate: 'S1', Batch: 'B1', Condition: 'Control' },
+    { Replicate: 'S2', Batch: 'B2', Condition: 'Treated' },
+  ],
+};
+
+function metaState(values: Record<string, unknown>, table?: MetadataTable): FormState {
+  const touched: Record<string, boolean> = {};
+  for (const k of Object.keys(values)) touched[k] = true;
+  return { mode: 'general', values, touched, metadata: table };
+}
+
+describe('rule: metadata-color-vars-valid', () => {
+  const rule = ruleById('metadata-color-vars-valid');
+
+  it('is a no-op when no metadata is loaded', () => {
+    expect(rule.check(metaState({ 'qc_report.color_vars': ['Nope'] }))).toBeNull();
+  });
+
+  it('fires when a color var is not a metadata column', () => {
+    const r = rule.check(
+      metaState({ 'qc_report.color_vars': ['Batch', 'Ghost'] }, META),
+    );
+    expect(r).not.toBeNull();
+    expect(r!.fields).toContain('qc_report.color_vars');
+    expect(r!.message).toContain('"Ghost"');
+  });
+
+  it('is silent when all color vars are metadata columns', () => {
+    expect(
+      rule.check(metaState({ 'qc_report.color_vars': ['Batch', 'Condition'] }, META)),
+    ).toBeNull();
+  });
+
+  it('does not flag the Replicate column (not a variable)', () => {
+    expect(
+      rule.check(metaState({ 'qc_report.color_vars': ['Replicate'] }, META)),
+    ).not.toBeNull();
+  });
+
+  it('is a no-op when QC is skipped', () => {
+    expect(
+      rule.check(
+        metaState(
+          { 'qc_report.skip': true, 'qc_report.color_vars': ['Ghost'] },
+          META,
+        ),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('rule: metadata-exclude-replicates-valid', () => {
+  const rule = ruleById('metadata-exclude-replicates-valid');
+
+  it('fires when an excluded replicate is not a known replicate name', () => {
+    const r = rule.check(
+      metaState({ 'qc_report.exclude_replicates': ['S9'] }, META),
+    );
+    expect(r).not.toBeNull();
+    expect(r!.message).toContain('"S9"');
+  });
+
+  it('is silent when all excluded replicates are known', () => {
+    expect(
+      rule.check(metaState({ 'qc_report.exclude_replicates': ['S1', 'S2'] }, META)),
+    ).toBeNull();
+  });
+});
+
+describe('rule: metadata-batch1-valid', () => {
+  const rule = ruleById('metadata-batch1-valid');
+
+  it('fires when batch1 is not a metadata column', () => {
+    const r = rule.check(
+      metaState({ 'batch_report.skip': false, 'batch_report.batch1': 'Ghost' }, META),
+    );
+    expect(r).not.toBeNull();
+  });
+
+  it('is silent for a valid column', () => {
+    expect(
+      rule.check(
+        metaState({ 'batch_report.skip': false, 'batch_report.batch1': 'Batch' }, META),
+      ),
+    ).toBeNull();
+  });
+
+  it('is a no-op when the batch report is skipped', () => {
+    expect(
+      rule.check(
+        metaState({ 'batch_report.skip': true, 'batch_report.batch1': 'Ghost' }, META),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('rule: metadata-batch2-valid', () => {
+  const rule = ruleById('metadata-batch2-valid');
+  it('fires for an unknown column', () => {
+    expect(
+      rule.check(
+        metaState({ 'batch_report.skip': false, 'batch_report.batch2': 'Ghost' }, META),
+      ),
+    ).not.toBeNull();
+  });
+  it('is silent for a valid column', () => {
+    expect(
+      rule.check(
+        metaState({ 'batch_report.skip': false, 'batch_report.batch2': 'Condition' }, META),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('rule: metadata-covariate-vars-valid', () => {
+  const rule = ruleById('metadata-covariate-vars-valid');
+  it('fires for an unknown covariate column', () => {
+    expect(
+      rule.check(
+        metaState(
+          { 'batch_report.skip': false, 'batch_report.covariate_vars': ['Ghost'] },
+          META,
+        ),
+      ),
+    ).not.toBeNull();
+  });
+  it('is silent for valid covariate columns', () => {
+    expect(
+      rule.check(
+        metaState(
+          { 'batch_report.skip': false, 'batch_report.covariate_vars': ['Batch'] },
+          META,
+        ),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('rule: metadata-control-key-valid', () => {
+  const rule = ruleById('metadata-control-key-valid');
+  it('fires for an unknown control key column', () => {
+    expect(
+      rule.check(
+        metaState({ 'batch_report.skip': false, 'batch_report.control_key': 'Ghost' }, META),
+      ),
+    ).not.toBeNull();
+  });
+  it('is silent for a valid control key column', () => {
+    expect(
+      rule.check(
+        metaState({ 'batch_report.skip': false, 'batch_report.control_key': 'Condition' }, META),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('rule: metadata-control-values-valid', () => {
+  const rule = ruleById('metadata-control-values-valid');
+
+  it('fires when a control value is not in the control-key column', () => {
+    const r = rule.check(
+      metaState(
+        {
+          'batch_report.skip': false,
+          'batch_report.control_key': 'Condition',
+          'batch_report.control_values': ['Control', 'Bogus'],
+        },
+        META,
+      ),
+    );
+    expect(r).not.toBeNull();
+    expect(r!.message).toContain('"Bogus"');
+    expect(r!.fields).toContain('batch_report.control_key');
+  });
+
+  it('is silent when control values are present in the column', () => {
+    expect(
+      rule.check(
+        metaState(
+          {
+            'batch_report.skip': false,
+            'batch_report.control_key': 'Condition',
+            'batch_report.control_values': ['Control', 'Treated'],
+          },
+          META,
+        ),
+      ),
+    ).toBeNull();
+  });
+
+  it('is a no-op until a control key is chosen', () => {
+    expect(
+      rule.check(
+        metaState(
+          { 'batch_report.skip': false, 'batch_report.control_values': ['Anything'] },
+          META,
+        ),
+      ),
+    ).toBeNull();
   });
 });

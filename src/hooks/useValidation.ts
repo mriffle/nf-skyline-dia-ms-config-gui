@@ -9,9 +9,10 @@ export function useValidation(): ValidationReport {
   const mode = useStore((s) => s.mode);
   const values = useStore((s) => s.values);
   const touched = useStore((s) => s.touched);
+  const metadata = useStore((s) => s.metadata);
   return useMemo(
-    () => runValidation({ mode, values, touched }),
-    [mode, values, touched],
+    () => runValidation({ mode, values, touched, metadata }),
+    [mode, values, touched, metadata],
   );
 }
 

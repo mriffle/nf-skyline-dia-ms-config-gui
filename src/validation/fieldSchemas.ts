@@ -142,6 +142,13 @@ function schemaForWidget(meta: ParamMeta): ZodTypeAny | null {
       return multiEnumSchema(meta);
     case 'string-list':
       return stringListSchema();
+    case 'metadata-single':
+      // Stores a single string (same shape as 'text'). The "value exists
+      // in the metadata" invariant is a cross-field rule, not field-level.
+      return nonEmptyString();
+    case 'metadata-multi':
+      // Stores string[] (same shape as 'string-list').
+      return stringListSchema();
     case 'glob-regex-pair':
       // Field-level no-op. Cross-field rule (glob-xor-regex-*) covers
       // the only invariant that matters: not-both-set.
@@ -172,8 +179,20 @@ function schemaForWidget(meta: ParamMeta): ZodTypeAny | null {
  *
  * Callers MUST only invoke this for touched fields; untouched empty
  * fields are reported (when required) by cross-field rules.
+ *
+ * `required` reflects the field's `requiredWhen` predicate for the
+ * current state. An empty value means "unset" — for an OPTIONAL field
+ * that is valid (a field the user typed into and then cleared must not
+ * read as required). Presence of a required value is enforced here
+ * (the `nonEmptyString` widgets surface "Required.") and, redundantly,
+ * by the cross-field rule layer.
  */
-export function validateField(meta: ParamMeta, value: unknown): string | undefined {
+export function validateField(
+  meta: ParamMeta,
+  value: unknown,
+  required = false,
+): string | undefined {
+  if (!required && (value === '' || value === undefined)) return undefined;
   const schema = schemaForWidget(meta);
   if (schema === null) return undefined;
   const result = schema.safeParse(value);

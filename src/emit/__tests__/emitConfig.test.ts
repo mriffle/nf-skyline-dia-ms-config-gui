@@ -376,6 +376,45 @@ describe('emitConfig — untouched values are skipped', () => {
   });
 });
 
+describe('emitConfig — touched-but-empty values are skipped', () => {
+  it('does not emit a scalar field the user cleared back to empty', () => {
+    // Repro: type a value into an optional field, then erase it. The
+    // path is still touched with value '' — it must NOT appear.
+    const state: FormState = {
+      mode: 'general',
+      values: { chromatogram_library_spectra_dir: '' },
+      touched: { chromatogram_library_spectra_dir: true },
+    };
+    const out = emit(state);
+    expect(out).not.toContain('chromatogram_library_spectra_dir');
+  });
+
+  it('does not emit an empty list or empty quant_spectra_dir', () => {
+    const state: FormState = {
+      mode: 'general',
+      values: {
+        quant_spectra_dir: { kind: 'list', paths: [] },
+        'carafe.pdc_files': [],
+      },
+      touched: { quant_spectra_dir: true, 'carafe.pdc_files': true },
+    };
+    const out = emit(state);
+    expect(out).not.toContain('quant_spectra_dir');
+    expect(out).not.toContain('pdc_files');
+  });
+
+  it('still emits real falsy values (false / 0)', () => {
+    const state: FormState = {
+      mode: 'general',
+      values: { use_vendor_raw: false, files_per_quant_batch: 0 },
+      touched: { use_vendor_raw: true, files_per_quant_batch: true },
+    };
+    const out = emit(state);
+    expect(out).toContain('use_vendor_raw = false');
+    expect(out).toContain('files_per_quant_batch = 0');
+  });
+});
+
 describe('emitConfig — affects-only paths (no direct ParamMeta)', () => {
   // quant_spectra_glob et al. are reachable only via a virtual parent's
   // `affects` list. They must still be emitted when touched — section
