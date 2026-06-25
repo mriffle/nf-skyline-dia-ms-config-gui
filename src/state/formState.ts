@@ -17,7 +17,9 @@ export interface StoreState extends FormState {
 //       defaultOverride (builder ships a "group by default" stance).
 //   v6: preservedOuterText added to persisted state for outer-block
 //       round-trip support.
-export const CURRENT_STORE_VERSION = 6;
+//   v7: qc_report.report_format pre-seeded to ['html'] (paired with
+//       defaultOverride + alwaysEmit) so QC reports default to HTML only.
+export const CURRENT_STORE_VERSION = 7;
 
 export const createDefaultState = (): StoreState => ({
   mode: 'general',
@@ -34,10 +36,16 @@ export const createDefaultState = (): StoreState => ({
   // default of true. batch_report.skip is pre-seeded to true to match the
   // upstream default — the seed only exists so the toggle and dependent
   // enabledWhen predicates reflect that default on first render.
+  //
+  // qc_report.report_format is pre-seeded to ['html'] (paired with
+  // defaultOverride + alwaysEmit on the meta) so a fresh config defaults
+  // to HTML-only QC reports and the cross-field rule sees a valid
+  // selection from first render.
   values: {
     use_carafe: true,
     search_engine: 'diann',
     'qc_report.skip': false,
+    'qc_report.report_format': ['html'],
     'batch_report.skip': true,
     'skyline.group_proteins': true,
   },

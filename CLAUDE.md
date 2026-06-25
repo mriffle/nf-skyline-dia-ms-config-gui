@@ -67,7 +67,7 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   └── store.ts                    Zustand store + persist middleware
     ├── validation/
     │   ├── fieldSchemas.ts             Zod schemas per widget kind
-    │   ├── crossFieldRules.ts          18 hand-authored cross-field rules
+    │   ├── crossFieldRules.ts          19 hand-authored cross-field rules
     │   ├── runValidation.ts            entry point: state → ValidationReport
     │   └── types.ts
     ├── emit/
@@ -183,9 +183,12 @@ the sticky stacking context (must portal to `document.body`).
   `searchEngineIs('encyclopedia','EncyclopeDIA')`),
   `cascadia.use_gpu` / `cascadia.score_threshold` (predicate on
   `searchEngineIs('cascadia','CascaDIA','Cascadia')`),
-  `carafe.cli_options` (predicate on `carafeEnabled`), and
+  `carafe.cli_options` (predicate on `carafeEnabled`),
   `skyline.group_proteins` / `skyline.group_by_gene` /
-  `skyline.protein_parsimony` (predicate on `skylineNotSkipped`).
+  `skyline.protein_parsimony` (predicate on `skylineNotSkipped`), and
+  `qc_report.report_format` (predicate on `qcReportNotSkipped`, paired
+  with `defaultOverride: ['html']` — QC reports default to HTML only;
+  see §5 for the matching cross-field rule).
 - **`surfaceHidden` opt-in on `ParamMeta`**: deliberate exception to the
   "hidden schema params don't appear in the UI" rule. Set on a ParamMeta
   whose `path` binds to a schema entry marked `hidden: true` (the coverage
@@ -257,9 +260,15 @@ paths that would become invisible.
   flips it. `alwaysEmit` is gated on `skylineNotSkipped`, so the
   generated config writes `group_proteins = true` whenever Skyline is
   running.
+- `qc_report.report_format: ['html']` — paired with
+  `defaultOverride: ['html']` and `alwaysEmit` gated on
+  `qcReportNotSkipped`. The schema declares no default; the builder ships
+  an "HTML only" stance. Pre-seeded so the `qc-report-format-required`
+  cross-field rule (§5) sees a valid selection from first render.
 
 If you change what's pre-seeded, bump `CURRENT_STORE_VERSION` so the
 `persist.migrate` step resets stale browser drafts to the new default.
+(Currently `7`.)
 
 ### 4. Emit-only-touched invariant (DO NOT BREAK)
 
@@ -326,7 +335,7 @@ Two layers, both running on every state change:
 
 1. **Per-widget Zod schemas** (`fieldSchemas.ts`) — applied only to *visible*
    and *touched* fields. Type-shape correctness.
-2. **Hand-rolled cross-field rules** (`crossFieldRules.ts`) — 18 rules, each
+2. **Hand-rolled cross-field rules** (`crossFieldRules.ts`) — 19 rules, each
    with `id`, `severity: 'error' | 'warning'`, and a `check(state)` returning
    `null` or `{ message, fields }`. Rule IDs are stable and referenced by
    tests.
@@ -663,10 +672,13 @@ change `affects` semantics, update both.
 - `null` is accepted for any nullable shape (the schema default for
   many fields is null; `search_engine = null` is "no-search mode").
 - Range bounds are non-fatal: keep the value, record `range-violation`.
-- `string-or-list` coerces based on the matching widget kind:
-  - `string-list` widget + scalar string in file → wrap in 1-element
+- `string-or-list` coerces based on the matching widget kind. List-storing
+  widgets (`string-list` AND `multi-enum`, e.g. `qc_report.report_format`)
+  want an array; everything else wants a scalar:
+  - list-storing widget + scalar string in file → wrap in 1-element
     array (`string-coerced-to-list`).
-  - non-`string-list` widget + array in file → keep the first element
+  - list-storing widget + array → kept as-is.
+  - scalar widget + array in file → keep the first element
     (`list-truncated-to-string` if length > 1).
 - `quant_spectra_dir` is special — the inverse of the emitter's
   `normalizeQuantSpectraDir`. String → `{kind:'single'}`, array →
@@ -1234,7 +1246,7 @@ When you add an `alwaysEmit` field:
 | CodeEditor overlay                   | YES     | Textarea binding + highlight layer sync; alignment is visual (edit-diag) |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **526 tests across 28 files**. Run `npm test` before pushing.
+Current count: **532 tests across 28 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff

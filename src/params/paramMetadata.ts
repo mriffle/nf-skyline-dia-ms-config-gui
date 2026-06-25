@@ -133,6 +133,8 @@ function carafeSourceIs(value: string) {
 
 const skylineNotSkipped = (s: FormState) => s.values['skyline.skip'] !== true;
 
+const qcReportNotSkipped = (s: FormState) => s.values['qc_report.skip'] !== true;
+
 // True when uploaded outer-scope text already defines a profiles { } block.
 // In that case the user owns the profiles layer: the generator must not emit
 // its own `standard` profile (no override), and the resource/cache fields
@@ -790,10 +792,16 @@ export const paramMetadata: readonly ParamMeta[] = [
     path: 'qc_report.report_format',
     section: 'qc-reporting',
     label: 'QC report format',
-    help: 'Which QC report formats to render. Pick one or both of HTML and PDF.',
+    help: 'Which QC report formats to render. At least one of HTML or PDF must be selected; defaults to HTML only.',
     tier: 'advanced',
     widget: 'multi-enum',
-    visibleWhen: (s) => s.values['qc_report.skip'] !== true,
+    visibleWhen: qcReportNotSkipped,
+    requiredWhen: qcReportNotSkipped,
+    // The schema declares no default (null); the builder ships an
+    // "HTML only" stance. Paired with alwaysEmit (gated on QC running)
+    // so the chosen formats are always written explicitly.
+    defaultOverride: ['html'],
+    alwaysEmit: qcReportNotSkipped,
     group: 'QC report',
   },
   {
@@ -850,8 +858,8 @@ export const paramMetadata: readonly ParamMeta[] = [
     path: 'qc_report.color_vars',
     section: 'qc-reporting',
     label: 'PCA color variables',
-    help: 'Replicate-metadata column names used to color the QC PCA plot.',
-    tier: 'advanced',
+    help: 'Metadata variables used to color the QC PCA plots. Leave blank to not color the PCA plots.',
+    tier: 'common',
     widget: 'string-list',
     visibleWhen: (s) => s.values['qc_report.skip'] !== true,
     group: 'QC report',

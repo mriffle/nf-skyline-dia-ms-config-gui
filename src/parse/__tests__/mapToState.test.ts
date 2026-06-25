@@ -209,6 +209,19 @@ describe('mapToState — string-or-list coercion', () => {
     expect(r.report.issues).toEqual([]);
     expect(r.state.values['carafe.pdc_files']).toEqual(['a.raw', 'b.raw']);
   });
+
+  it('keeps an array for a multi-enum widget (qc_report.report_format)', () => {
+    const r = mapToState([e('qc_report.report_format', ['html', 'pdf'])]);
+    expect(r.report.issues).toEqual([]);
+    expect(r.state.values['qc_report.report_format']).toEqual(['html', 'pdf']);
+  });
+
+  it('wraps a scalar string into a list for a multi-enum widget', () => {
+    const r = mapToState([e('qc_report.report_format', 'html')]);
+    const hit = findIssue(r.report.issues, 'string-coerced-to-list');
+    expect(hit).toBeDefined();
+    expect(r.state.values['qc_report.report_format']).toEqual(['html']);
+  });
 });
 
 describe('mapToState — mode inference', () => {

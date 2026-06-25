@@ -474,6 +474,23 @@ const ruleVendorRawEngine: CrossFieldRule = {
   },
 };
 
+// 19. qc-report-format-required
+const ruleQcReportFormatRequired: CrossFieldRule = {
+  id: 'qc-report-format-required',
+  severity: 'error',
+  check: (s) => {
+    if (s.values['qc_report.skip'] === true) return null;
+    const fmt = s.values['qc_report.report_format'];
+    const has = (v: unknown): boolean => v === 'html' || v === 'pdf';
+    const ok = Array.isArray(fmt) ? fmt.some(has) : has(fmt);
+    if (ok) return null;
+    return {
+      message: 'Select at least one QC report format (HTML or PDF).',
+      fields: ['qc_report.report_format'],
+    };
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Ordered rule list
 // ---------------------------------------------------------------------------
@@ -497,4 +514,5 @@ export const crossFieldRules: readonly CrossFieldRule[] = Object.freeze([
   rulePanoramaUploadRequiresUrl,
   rulePanoramaImportPrereqs,
   ruleVendorRawEngine,
+  ruleQcReportFormatRequired,
 ]);

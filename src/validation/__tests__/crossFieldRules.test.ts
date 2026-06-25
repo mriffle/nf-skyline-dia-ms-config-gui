@@ -873,12 +873,53 @@ describe('rule: vendor-raw-engine', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 19. qc-report-format-required
+// ---------------------------------------------------------------------------
+
+describe('rule: qc-report-format-required', () => {
+  const rule = ruleById('qc-report-format-required');
+
+  it('fires when QC runs but no format is selected', () => {
+    const r = rule.check(
+      makeState({ values: { 'qc_report.report_format': [] } }),
+    );
+    expect(r).not.toBeNull();
+    expect(rule.severity).toBe('error');
+  });
+
+  it('fires when QC runs and the format value is missing entirely', () => {
+    expect(rule.check(makeState({ values: {} }))).not.toBeNull();
+  });
+
+  it('stays silent when at least one format is selected', () => {
+    expect(
+      rule.check(makeState({ values: { 'qc_report.report_format': ['html'] } })),
+    ).toBeNull();
+    expect(
+      rule.check(
+        makeState({ values: { 'qc_report.report_format': ['html', 'pdf'] } }),
+      ),
+    ).toBeNull();
+  });
+
+  it('stays silent when QC reporting is skipped', () => {
+    expect(
+      rule.check(
+        makeState({
+          values: { 'qc_report.skip': true, 'qc_report.report_format': [] },
+        }),
+      ),
+    ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Sanity: list length and unique IDs
 // ---------------------------------------------------------------------------
 
 describe('crossFieldRules list', () => {
-  it('contains exactly 18 rules', () => {
-    expect(crossFieldRules.length).toBe(18);
+  it('contains exactly 19 rules', () => {
+    expect(crossFieldRules.length).toBe(19);
   });
 
   it('has unique rule IDs', () => {

@@ -23,7 +23,11 @@ function makeState({
 
 describe('runValidation — baseline empty / minimal states', () => {
   it('empty general-mode state is invalid with a single input-required error', () => {
-    const report = runValidation(makeState());
+    // Seed the QC format the way createDefaultState does so this isolates
+    // the input-required error (QC runs by default, so a format is required).
+    const report = runValidation(
+      makeState({ values: { 'qc_report.report_format': ['html'] } }),
+    );
     expect(report.isValid).toBe(false);
     expect(report.isDownloadable).toBe(false);
     expect(report.fieldErrors).toEqual({});
@@ -47,6 +51,7 @@ describe('runValidation — minimal-valid general-mode DIA-NN', () => {
         quant_spectra_dir: { kind: 'single', path: '/data/wide' },
         search_engine: 'diann',
         fasta: '/db.fasta',
+        'qc_report.report_format': ['html'],
       },
     });
     const report = runValidation(state);
@@ -65,6 +70,7 @@ describe('runValidation — minimal-valid PDC-mode DIA-NN', () => {
         'pdc.study_id': 'PDC000123',
         search_engine: 'diann',
         fasta: '/db.fasta',
+        'qc_report.report_format': ['html'],
       },
     });
     const report = runValidation(state);
@@ -80,6 +86,7 @@ describe('runValidation — minimal-valid PDC-mode DIA-NN', () => {
       values: {
         'pdc.study_id': 'PDC000123',
         msconvert_only: true,
+        'qc_report.report_format': ['html'],
       },
     });
     const report = runValidation(state);
@@ -94,6 +101,7 @@ describe('runValidation — warning-only state', () => {
         quant_spectra_dir: { kind: 'single', path: '/data/wide' },
         search_engine: 'cascadia',
         spectral_library: '/lib.dlib',
+        'qc_report.report_format': ['html'],
       },
     });
     const report = runValidation(state);

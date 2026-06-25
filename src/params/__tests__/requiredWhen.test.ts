@@ -114,9 +114,16 @@ describe('requiredWhen predicates', () => {
     expect(meta.requiredWhen?.(makeState('general', {}))).toBe(false);
   });
 
+  it('qc_report.report_format: required when QC runs, optional when skipped', () => {
+    const meta = findMeta('qc_report.report_format');
+    expect(meta.requiredWhen?.(makeState('general', { 'qc_report.skip': false }))).toBe(true);
+    expect(meta.requiredWhen?.(makeState('general', {}))).toBe(true);
+    expect(meta.requiredWhen?.(makeState('general', { 'qc_report.skip': true }))).toBe(false);
+  });
+
   it('every params that has a requiredWhen also has either no default or a meaningful conditional', () => {
-    // Sanity: count of params with requiredWhen should match the 10 we authored.
+    // Sanity: count of params with requiredWhen should match the 11 we authored.
     const withRequired = paramMetadata.filter((m) => m.requiredWhen !== undefined);
-    expect(withRequired).toHaveLength(10);
+    expect(withRequired).toHaveLength(11);
   });
 });
