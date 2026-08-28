@@ -33,18 +33,21 @@ export function encodeUrlValue(value: string): string {
 /**
  * Apply `encodeUrlValue` across the shapes a URL-bearing field may hold after
  * normalization: a bare string, an array of strings (string-list / list-kind
- * spectra), or a name->path map (batch-map). Only string leaves are encoded;
- * map keys (batch names) and non-string entries are left untouched.
+ * spectra), or a name->path(s) map (batch-map, whose values may themselves be
+ * lists). Only string leaves are encoded; map keys (batch names) and non-string
+ * entries are left untouched.
  */
 export function encodeUrlsDeep(value: unknown): unknown {
   if (typeof value === 'string') return encodeUrlValue(value);
+  // Recurse rather than only encoding string leaves one level down: a batch-map
+  // value may itself be a list of paths.
   if (Array.isArray(value)) {
-    return value.map((item) => (typeof item === 'string' ? encodeUrlValue(item) : item));
+    return value.map((item) => encodeUrlsDeep(item));
   }
   if (value !== null && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = typeof v === 'string' ? encodeUrlValue(v) : v;
+      out[k] = encodeUrlsDeep(v);
     }
     return out;
   }

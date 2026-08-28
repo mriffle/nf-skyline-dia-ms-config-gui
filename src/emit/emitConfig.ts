@@ -133,12 +133,18 @@ function normalizeQuantSpectraDir(value: unknown): unknown {
     return v.paths.filter((p): p is string => typeof p === 'string');
   }
   if (v.kind === 'batch-map' && Array.isArray(v.entries)) {
-    const out: Record<string, string> = {};
+    // A batch with one path emits a bare string, so single-path batch maps keep
+    // rendering exactly as they did before multi-path batches existed.
+    // Duplicate batch names would silently collapse here; the `batch-names-valid`
+    // cross-field rule blocks that state before it can reach the emitter.
+    const out: Record<string, string | string[]> = {};
     for (const raw of v.entries as readonly unknown[]) {
       if (raw === null || typeof raw !== 'object') continue;
-      const e = raw as { name?: unknown; path?: unknown };
-      if (typeof e.name !== 'string' || typeof e.path !== 'string') continue;
-      out[e.name] = e.path;
+      const e = raw as { name?: unknown; paths?: unknown };
+      if (typeof e.name !== 'string' || !Array.isArray(e.paths)) continue;
+      const paths = e.paths.filter((p): p is string => typeof p === 'string' && p !== '');
+      if (paths.length === 0) continue;
+      out[e.name] = paths.length === 1 ? paths[0]! : paths;
     }
     return out;
   }

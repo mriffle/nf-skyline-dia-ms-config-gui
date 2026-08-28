@@ -59,8 +59,12 @@ function isQuantSpectraSet(value: unknown): boolean {
       Array.isArray(v.entries) &&
       v.entries.some((e): boolean => {
         if (e === null || typeof e !== 'object') return false;
-        const obj = e as { name?: unknown; path?: unknown };
-        return isNonEmptyString(obj.name) && isNonEmptyString(obj.path);
+        const obj = e as { name?: unknown; paths?: unknown };
+        return (
+          isNonEmptyString(obj.name) &&
+          Array.isArray(obj.paths) &&
+          obj.paths.some(isNonEmptyString)
+        );
       })
     );
   }
@@ -430,6 +434,76 @@ const ruleBatchModeEngine: CrossFieldRule = {
   },
 };
 
+// 15b. batch-names-valid
+//
+// Mirrors validate_batch_names() in the workflow's modules/utils.nf, plus a uniqueness
+// check the workflow gets for free (a Groovy Map cannot hold duplicate keys, but this
+// form can). Without the uniqueness check the emitter's name->path map silently keeps
+// only the last entry, so a user could download a config analyzing the wrong data.
+const BATCH_NAME_SEPARATORS = /[/\\]/;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+function batchEntryNames(value: unknown): readonly string[] {
+  if (quantSpectraKind(value) !== 'batch-map') return [];
+  const entries = (value as { entries?: unknown }).entries;
+  if (!Array.isArray(entries)) return [];
+  const out: string[] = [];
+  for (const e of entries) {
+    if (e === null || typeof e !== 'object') continue;
+    const name = (e as { name?: unknown }).name;
+    if (typeof name === 'string') out.push(name);
+  }
+  return out;
+}
+
+const ruleBatchNamesValid: CrossFieldRule = {
+  id: 'batch-names-valid',
+  severity: 'error',
+  check: (s) => {
+    const names = batchEntryNames(s.values['quant_spectra_dir']);
+    if (names.length === 0) return null;
+
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+    for (const n of names) {
+      if (n === '') continue;
+      if (seen.has(n)) duplicates.add(n);
+      seen.add(n);
+    }
+    if (duplicates.size > 0) {
+      const shown = [...duplicates].map((n) => `'${n}'`).join(', ');
+      return {
+        message: `Batch names must be unique; repeated: ${shown}. Only the last entry with a given name would be used.`,
+        fields: ['quant_spectra_dir'],
+      };
+    }
+
+    for (const n of names) {
+      if (n === '') continue;
+      if (n !== n.trim()) {
+        return {
+          message: `Batch name '${n}' has leading or trailing whitespace.`,
+          fields: ['quant_spectra_dir'],
+        };
+      }
+      if (BATCH_NAME_SEPARATORS.test(n)) {
+        return {
+          message: `Batch name '${n}' cannot contain '/' or '\\' — batch names become part of a file name.`,
+          fields: ['quant_spectra_dir'],
+        };
+      }
+      if (CONTROL_CHARS.test(n)) {
+        return {
+          message: `Batch name '${n}' contains control characters.`,
+          fields: ['quant_spectra_dir'],
+        };
+      }
+    }
+    return null;
+  },
+};
+
 // 16. panorama-upload-requires-url
 const rulePanoramaUploadRequiresUrl: CrossFieldRule = {
   id: 'panorama-upload-requires-url',
@@ -635,6 +709,7 @@ export const crossFieldRules: readonly CrossFieldRule[] = Object.freeze([
   ruleCascadiaNoChrom,
   ruleCascadiaNoLibrary,
   ruleBatchModeEngine,
+  ruleBatchNamesValid,
   rulePanoramaUploadRequiresUrl,
   rulePanoramaImportPrereqs,
   ruleVendorRawEngine,

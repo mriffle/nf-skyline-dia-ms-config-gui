@@ -74,7 +74,7 @@ describe('SpectraSourceRadio', () => {
   it('reads existing batch-map entries when kind is batch-map', () => {
     setup({
       kind: 'batch-map',
-      entries: [{ name: 'b1', path: '/a' }],
+      entries: [{ name: 'b1', paths: ['/a'] }],
     });
     expect(screen.getByRole('radio', { name: /named batches/i })).toBeChecked();
     expect(screen.getByLabelText('Batch 1 name')).toHaveValue('b1');

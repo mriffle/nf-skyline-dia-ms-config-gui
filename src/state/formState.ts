@@ -20,7 +20,9 @@ export interface StoreState extends FormState {
 //   v7: qc_report.report_format pre-seeded to ['html'] (paired with
 //       defaultOverride + alwaysEmit) so QC reports default to HTML only.
 //   v8: metadata (uploaded sample-metadata table) added to persisted state.
-export const CURRENT_STORE_VERSION = 8;
+//   v9: batch-map entries changed from { name, path } to { name, paths[] }
+//       so a batch can draw from more than one directory.
+export const CURRENT_STORE_VERSION = 9;
 
 export const createDefaultState = (): StoreState => ({
   mode: 'general',

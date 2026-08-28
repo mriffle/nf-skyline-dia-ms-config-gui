@@ -67,7 +67,7 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   └── store.ts                    Zustand store + persist middleware
     ├── validation/
     │   ├── fieldSchemas.ts             Zod schemas per widget kind
-    │   ├── crossFieldRules.ts          26 hand-authored cross-field rules
+    │   ├── crossFieldRules.ts          27 hand-authored cross-field rules
     │   ├── runValidation.ts            entry point: state → ValidationReport
     │   └── types.ts
     ├── emit/
@@ -280,7 +280,8 @@ paths that would become invisible.
 
 If you change what's pre-seeded, bump `CURRENT_STORE_VERSION` so the
 `persist.migrate` step resets stale browser drafts to the new default.
-(Currently `8` — v8 added the persisted `metadata` table; see §12.)
+(Currently `9` — v9 changed batch-map entries from `{name, path}` to
+`{name, paths[]}`; v8 added the persisted `metadata` table, see §12.)
 
 ### 4. Emit-only-touched invariant (DO NOT BREAK)
 
@@ -347,12 +348,19 @@ Two layers, both running on every state change:
 
 1. **Per-widget Zod schemas** (`fieldSchemas.ts`) — applied only to *visible*
    and *touched* fields. Type-shape correctness.
-2. **Hand-rolled cross-field rules** (`crossFieldRules.ts`) — 26 rules, each
+2. **Hand-rolled cross-field rules** (`crossFieldRules.ts`) — 27 rules, each
    with `id`, `severity: 'error' | 'warning'`, and a `check(state)` returning
    `null` or `{ message, fields }`. Rule IDs are stable and referenced by
    tests. Rules 20-26 are the metadata-membership rules (`metadata-*-valid`):
    they no-op unless a metadata table is loaded, then error if a selected
    value isn't a column / replicate / control-value present in it — see §12.
+
+`batch-names-valid` mirrors `validate_batch_names()` in the workflow's
+`modules/utils.nf` (no separator / control chars / surrounding whitespace)
+and adds a uniqueness check the workflow gets for free — a Groovy Map can't
+hold duplicate keys, but the form's entry list can, and the emitter's
+name→path map would silently keep only the last one. Keep the two in sync:
+if the workflow's rule changes, change this rule too.
 
 `runValidation(state) → ValidationReport`. The download / copy buttons
 gate on `report.isDownloadable` (no error-severity issues anywhere).
@@ -553,7 +561,7 @@ Each widget is a memoized React component receiving `WidgetProps`:
 | `multi-enum`          | `MultiEnumChecks` (checkbox group)                |
 | `string-list`         | `StringListInput` (chip-style)                    |
 | `glob-regex-pair`     | virtual — pairs `*_glob` + `*_regex` mutex'd      |
-| `batch-map`           | virtual — list of `{name, path}` rows             |
+| `batch-map`           | virtual — list of `{name, paths[]}` rows          |
 | `spectra-source`      | virtual — radio for single / list / batch-map     |
 | `metadata-single`     | `MetadataSingleSelect` — select when metadata loaded, else `TextInput` |
 | `metadata-multi`      | `MetadataMultiSelect` — checkbox group when loaded, else `StringListInput` |
@@ -710,7 +718,8 @@ change `affects` semantics, update both.
     (`list-truncated-to-string` if length > 1).
 - `quant_spectra_dir` is special — the inverse of the emitter's
   `normalizeQuantSpectraDir`. String → `{kind:'single'}`, array →
-  `{kind:'list'}`, object → `{kind:'batch-map'}`.
+  `{kind:'list'}`, object → `{kind:'batch-map'}`. A batch-map value may be
+  a string or a list of strings; both load as `paths[]`.
 
 **Mode inference**: `pdc.study_id` present → `'pdc'`, else `'general'`.
 If both PDC and general inputs are present, PDC wins and a
@@ -1133,10 +1142,6 @@ When the coverage test fails: add the new param to `paramMetadata.ts`
 (with section, tier, help, widget, visibility predicates as needed) or
 add it to `IGNORED_PARAM_PATHS`. Then re-run tests.
 
-The upstream schema has a known typo: key `cascadia.score_threshold ` has
-a trailing space. The codegen trims keys, so `paramMetadata.ts` uses the
-clean name. Don't try to "fix" this locally — the trim handles it.
-
 ## Conventions for adding things
 
 ### New cross-field rule
@@ -1257,7 +1262,11 @@ When you add an `alwaysEmit` field:
 - **The `quant_spectra_dir` value is a tagged union**, not a plain string.
   Always one of `{kind: 'single', path}`, `{kind: 'list', paths}`, or
   `{kind: 'batch-map', entries}`. The emitter normalizes this to the
-  correct Groovy shape.
+  correct Groovy shape. A batch-map entry is `{name, paths: string[]}` — a
+  batch may draw from several directories. The emitter writes a bare string
+  for a one-path batch and a Groovy list for a multi-path one, so
+  single-path batch maps render exactly as they did before multi-path
+  support existed (which is what keeps the older goldens byte-identical).
 - **Don't commit `tsconfig.tsbuildinfo`** (it's in `.gitignore` but rsync
   can drag it in if you ever copy from elsewhere).
 - **Empty `params { }` block** is intentional when nothing is touched
@@ -1342,7 +1351,7 @@ When you add an `alwaysEmit` field:
 | Metadata membership rules            | YES     | One firing + one silent per `metadata-*-valid` rule |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **606 tests across 32 files**. Run `npm test` before pushing.
+Current count: **630 tests across 32 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff

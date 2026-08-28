@@ -266,7 +266,7 @@ describe('localStorage persistence', () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!);
     expect(parsed.state.values.fasta).toBe('/persisted.fasta');
-    expect(parsed.version).toBe(8);
+    expect(parsed.version).toBe(9);
   });
 });
 

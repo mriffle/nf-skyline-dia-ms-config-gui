@@ -59,8 +59,22 @@ describe('mapToState — happy paths', () => {
     expect(r.state.values['quant_spectra_dir']).toEqual({
       kind: 'batch-map',
       entries: [
-        { name: 'PlateA', path: '/data/A' },
-        { name: 'PlateB', path: '/data/B' },
+        { name: 'PlateA', paths: ['/data/A'] },
+        { name: 'PlateB', paths: ['/data/B'] },
+      ],
+    });
+  });
+
+  it('loads a batch-map whose values are lists of directories', () => {
+    const r = mapToState([
+      e('quant_spectra_dir', { PlateA: ['/data/A1', '/data/A2'], PlateB: '/data/B' }),
+    ]);
+    expect(r.report.issues).toEqual([]);
+    expect(r.state.values['quant_spectra_dir']).toEqual({
+      kind: 'batch-map',
+      entries: [
+        { name: 'PlateA', paths: ['/data/A1', '/data/A2'] },
+        { name: 'PlateB', paths: ['/data/B'] },
       ],
     });
   });

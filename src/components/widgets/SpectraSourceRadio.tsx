@@ -1,7 +1,7 @@
 // Tagged-union editor for quant_spectra_dir. Three sub-modes:
 //   - 'single'    -> { kind: 'single', path: string }
 //   - 'list'      -> { kind: 'list', paths: string[] }
-//   - 'batch-map' -> { kind: 'batch-map', entries: { name, path }[] }
+//   - 'batch-map' -> { kind: 'batch-map', entries: { name, paths }[] }
 
 import { memo, useId } from 'react';
 import { BatchMapBuilder, type BatchEntry } from './BatchMapBuilder';
@@ -70,10 +70,13 @@ function readEntries(value: unknown): readonly BatchEntry[] {
       const out: BatchEntry[] = [];
       for (const e of entries) {
         if (e === null || typeof e !== 'object') continue;
-        const obj = e as { name?: unknown; path?: unknown };
+        const obj = e as { name?: unknown; paths?: unknown };
+        const paths = Array.isArray(obj.paths)
+          ? obj.paths.filter((v): v is string => typeof v === 'string')
+          : [];
         out.push({
           name: typeof obj.name === 'string' ? obj.name : '',
-          path: typeof obj.path === 'string' ? obj.path : '',
+          paths: paths.length > 0 ? paths : [''],
         });
       }
       return out;

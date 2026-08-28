@@ -113,7 +113,9 @@ const SPECTRA_SOURCE_SCHEMA: ZodTypeAny = z.discriminatedUnion('kind', [
       .array(
         z.object({
           name: z.string().min(1, { message: 'Batch name is required.' }),
-          path: z.string().min(1, { message: 'Path is required.' }),
+          paths: z
+            .array(z.string().min(1, { message: 'Paths cannot be empty.' }))
+            .min(1, { message: 'Add at least one path.' }),
         }),
       )
       .min(1, { message: 'Add at least one batch entry.' }),

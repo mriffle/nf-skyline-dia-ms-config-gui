@@ -126,14 +126,47 @@ describe('emitConfig — golden files', () => {
         quant_spectra_dir: {
           kind: 'batch-map',
           entries: [
-            { name: 'PlateA', path: '/data/A' },
-            { name: 'PlateB', path: '/data/B' },
-            { name: 'PlateC', path: '/data/C' },
+            { name: 'PlateA', paths: ['/data/A'] },
+            { name: 'PlateB', paths: ['/data/B'] },
+            { name: 'PlateC', paths: ['/data/C'] },
           ],
         },
       },
     });
     checkGolden(emit(state), 'general-batch-map.config');
+  });
+
+  it('batch-map with multiple directories per batch emits a list value', () => {
+    const state = makeState({
+      values: {
+        quant_spectra_dir: {
+          kind: 'batch-map',
+          entries: [
+            { name: 'PlateA', paths: ['/data/A1', '/data/A2'] },
+            // A single-path batch still emits a bare string, so mixed maps read naturally.
+            { name: 'PlateB', paths: ['/data/B'] },
+          ],
+        },
+      },
+    });
+    checkGolden(emit(state), 'general-batch-map-multidir.config');
+  });
+
+  it('drops empty paths and batches left with no path at all', () => {
+    const state = makeState({
+      values: {
+        quant_spectra_dir: {
+          kind: 'batch-map',
+          entries: [
+            { name: 'PlateA', paths: ['/data/A', ''] },
+            { name: 'Empty', paths: [''] },
+          ],
+        },
+      },
+    });
+    const out = emit(state);
+    expect(out).toContain("'PlateA': '/data/A'");
+    expect(out).not.toContain('Empty');
   });
 
   it('PDC / DIA-NN simple', () => {

@@ -260,9 +260,15 @@ function coerceQuantSpectraDir(
     return { ok: true, value: { kind: 'list', paths } };
   }
   if (typeof rawValue === 'object') {
-    const entries: { name: string; path: string }[] = [];
+    // A batch value is either one path or a list of them; both round-trip.
+    const entries: { name: string; paths: string[] }[] = [];
     for (const [k, v] of Object.entries(rawValue)) {
-      if (typeof v === 'string') entries.push({ name: k, path: v });
+      if (typeof v === 'string') {
+        entries.push({ name: k, paths: [v] });
+      } else if (Array.isArray(v)) {
+        const paths = v.filter((p): p is string => typeof p === 'string');
+        if (paths.length > 0) entries.push({ name: k, paths });
+      }
     }
     return { ok: true, value: { kind: 'batch-map', entries } };
   }

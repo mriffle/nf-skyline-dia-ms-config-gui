@@ -115,11 +115,11 @@ function renderWidget(props: WidgetProps) {
     case 'batch-map': {
       const entries = Array.isArray(props.value)
         ? props.value.filter(
-            (e): e is { name: string; path: string } =>
+            (e): e is { name: string; paths: string[] } =>
               !!e &&
               typeof e === 'object' &&
               typeof (e as { name?: unknown }).name === 'string' &&
-              typeof (e as { path?: unknown }).path === 'string',
+              Array.isArray((e as { paths?: unknown }).paths),
           )
         : [];
       return (

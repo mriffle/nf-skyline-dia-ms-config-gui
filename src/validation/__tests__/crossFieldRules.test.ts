@@ -758,6 +758,69 @@ describe('rule: batch-mode-engine', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 15b. batch-names-valid
+// ---------------------------------------------------------------------------
+
+describe('rule: batch-names-valid', () => {
+  const rule = ruleById('batch-names-valid');
+
+  function withBatches(names: readonly string[]) {
+    return makeState({
+      values: {
+        ...VALID_DIANN_GENERAL,
+        quant_spectra_dir: {
+          kind: 'batch-map',
+          entries: names.map((name) => ({ name, paths: ['/data/x'] })),
+        },
+      },
+    });
+  }
+
+  it('fires on duplicate batch names', () => {
+    const r = rule.check(withBatches(['PlateA', 'PlateB', 'PlateA']));
+    expect(r).not.toBeNull();
+    expect(r?.message).toContain('unique');
+    expect(r?.message).toContain('PlateA');
+  });
+
+  it('fires on a batch name containing a path separator', () => {
+    const r = rule.check(withBatches(['a/b']));
+    expect(r).not.toBeNull();
+    expect(r?.message).toContain('a/b');
+  });
+
+  it('fires on a batch name containing a backslash', () => {
+    expect(rule.check(withBatches(['a\\b']))).not.toBeNull();
+  });
+
+  it('fires on a batch name with leading or trailing whitespace', () => {
+    const r = rule.check(withBatches(['Plate1 ']));
+    expect(r).not.toBeNull();
+    expect(r?.message).toContain('whitespace');
+  });
+
+  it('fires on a batch name containing a control character', () => {
+    expect(rule.check(withBatches(['Plate\u0001']))).not.toBeNull();
+  });
+
+  it('is silent for distinct, well-formed names', () => {
+    expect(rule.check(withBatches(['PlateA', 'PlateB']))).toBeNull();
+  });
+
+  it('is silent for a name containing an interior space', () => {
+    expect(rule.check(withBatches(['Plate 1']))).toBeNull();
+  });
+
+  it('is silent when quant input is not a batch map', () => {
+    expect(rule.check(makeState({ values: VALID_DIANN_GENERAL }))).toBeNull();
+  });
+
+  it('ignores blank names, which the per-field schema already rejects', () => {
+    expect(rule.check(withBatches(['', '']))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 16. panorama-upload-requires-url
 // ---------------------------------------------------------------------------
 
@@ -919,8 +982,8 @@ describe('rule: qc-report-format-required', () => {
 // ---------------------------------------------------------------------------
 
 describe('crossFieldRules list', () => {
-  it('contains exactly 26 rules', () => {
-    expect(crossFieldRules.length).toBe(26);
+  it('contains exactly 27 rules', () => {
+    expect(crossFieldRules.length).toBe(27);
   });
 
   it('has unique rule IDs', () => {

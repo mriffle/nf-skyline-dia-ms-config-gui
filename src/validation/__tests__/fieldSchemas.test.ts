@@ -217,7 +217,7 @@ describe('validateField — spectra-source (tagged union)', () => {
     expect(
       validateField(metaFor('quant_spectra_dir'), {
         kind: 'batch-map',
-        entries: [{ name: 'b1', path: '/x' }],
+        entries: [{ name: 'b1', paths: ['/x'] }],
       }),
     ).toBeUndefined();
   });

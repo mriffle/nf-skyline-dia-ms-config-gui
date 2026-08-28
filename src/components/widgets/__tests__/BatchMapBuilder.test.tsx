@@ -27,8 +27,8 @@ describe('BatchMapBuilder', () => {
 
   it('renders existing rows', () => {
     setup([
-      { name: 'b1', path: '/a' },
-      { name: 'b2', path: '/b' },
+      { name: 'b1', paths: ['/a'] },
+      { name: 'b2', paths: ['/b'] },
     ]);
     expect(screen.getByLabelText('Batch 1 name')).toHaveValue('b1');
     expect(screen.getByLabelText('Batch 2 path')).toHaveValue('/b');
@@ -36,30 +36,61 @@ describe('BatchMapBuilder', () => {
 
   it('typing in the name field calls onChange with the patched row', async () => {
     const user = userEvent.setup();
-    const { onChange } = setup([{ name: '', path: '' }]);
+    const { onChange } = setup([{ name: '', paths: [''] }]);
     await user.type(screen.getByLabelText('Batch 1 name'), 'x');
     expect(onChange).toHaveBeenCalled();
     const last = onChange.mock.calls.at(-1)?.[0];
-    expect(last).toEqual([{ name: 'x', path: '' }]);
+    expect(last).toEqual([{ name: 'x', paths: [''] }]);
   });
 
   it('clicking Add batch appends an empty row', async () => {
     const user = userEvent.setup();
-    const { onChange } = setup([{ name: 'b1', path: '/a' }]);
+    const { onChange } = setup([{ name: 'b1', paths: ['/a'] }]);
     await user.click(screen.getByRole('button', { name: /add batch/i }));
     expect(onChange).toHaveBeenCalledWith([
-      { name: 'b1', path: '/a' },
-      { name: '', path: '' },
+      { name: 'b1', paths: ['/a'] },
+      { name: '', paths: [''] },
     ]);
+  });
+
+  it('renders one input per path and labels them when there are several', () => {
+    setup([{ name: 'b1', paths: ['/a', '/b'] }]);
+    expect(screen.getByLabelText('Batch 1 path 1')).toHaveValue('/a');
+    expect(screen.getByLabelText('Batch 1 path 2')).toHaveValue('/b');
+  });
+
+  it('clicking Add path appends an empty path to that batch only', async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup([
+      { name: 'b1', paths: ['/a'] },
+      { name: 'b2', paths: ['/b'] },
+    ]);
+    await user.click(screen.getByRole('button', { name: /add path to batch 1/i }));
+    expect(onChange).toHaveBeenCalledWith([
+      { name: 'b1', paths: ['/a', ''] },
+      { name: 'b2', paths: ['/b'] },
+    ]);
+  });
+
+  it('removes a single path without removing the batch', async () => {
+    const user = userEvent.setup();
+    const { onChange } = setup([{ name: 'b1', paths: ['/a', '/b'] }]);
+    await user.click(screen.getByRole('button', { name: /remove batch 1 path 2/i }));
+    expect(onChange).toHaveBeenCalledWith([{ name: 'b1', paths: ['/a'] }]);
+  });
+
+  it('offers no per-path remove button when a batch has one path', () => {
+    setup([{ name: 'b1', paths: ['/a'] }]);
+    expect(screen.queryByRole('button', { name: /remove batch 1 path/i })).toBeNull();
   });
 
   it('clicking the remove button removes the row', async () => {
     const user = userEvent.setup();
     const { onChange } = setup([
-      { name: 'b1', path: '/a' },
-      { name: 'b2', path: '/b' },
+      { name: 'b1', paths: ['/a'] },
+      { name: 'b2', paths: ['/b'] },
     ]);
     await user.click(screen.getByRole('button', { name: /remove batch 1/i }));
-    expect(onChange).toHaveBeenCalledWith([{ name: 'b2', path: '/b' }]);
+    expect(onChange).toHaveBeenCalledWith([{ name: 'b2', paths: ['/b'] }]);
   });
 });
