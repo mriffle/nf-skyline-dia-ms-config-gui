@@ -793,10 +793,14 @@ describe('rule: batch-names-valid', () => {
     expect(rule.check(withBatches(['a\\b']))).not.toBeNull();
   });
 
-  it('fires on a batch name with leading or trailing whitespace', () => {
-    const r = rule.check(withBatches(['Plate1 ']));
+  it('is silent for a batch name with surrounding whitespace — it is trimmed', () => {
+    expect(rule.check(withBatches(['Plate1 ', ' Plate2']))).toBeNull();
+  });
+
+  it('fires when two names collide only after trimming', () => {
+    const r = rule.check(withBatches(['Plate1', 'Plate1 ']));
     expect(r).not.toBeNull();
-    expect(r?.message).toContain('whitespace');
+    expect(r?.message).toContain('Plate1');
   });
 
   it('fires on a batch name containing a control character', () => {

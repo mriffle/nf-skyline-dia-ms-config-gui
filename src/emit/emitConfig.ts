@@ -142,9 +142,12 @@ function normalizeQuantSpectraDir(value: unknown): unknown {
       if (raw === null || typeof raw !== 'object') continue;
       const e = raw as { name?: unknown; paths?: unknown };
       if (typeof e.name !== 'string' || !Array.isArray(e.paths)) continue;
+      // Trim to match the workflow, which trims batch names in normalize_batch_map.
+      const name = e.name.trim();
+      if (name === '') continue;
       const paths = e.paths.filter((p): p is string => typeof p === 'string' && p !== '');
       if (paths.length === 0) continue;
-      out[e.name] = paths.length === 1 ? paths[0]! : paths;
+      out[name] = paths.length === 1 ? paths[0]! : paths;
     }
     return out;
   }

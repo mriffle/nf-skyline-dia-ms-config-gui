@@ -152,6 +152,18 @@ describe('emitConfig — golden files', () => {
     checkGolden(emit(state), 'general-batch-map-multidir.config');
   });
 
+  it('trims surrounding whitespace from batch names', () => {
+    const state = makeState({
+      values: {
+        quant_spectra_dir: {
+          kind: 'batch-map',
+          entries: [{ name: '  PlateA  ', paths: ['/data/A'] }],
+        },
+      },
+    });
+    expect(emit(state)).toContain("'PlateA': '/data/A'");
+  });
+
   it('drops empty paths and batches left with no path at all', () => {
     const state = makeState({
       values: {

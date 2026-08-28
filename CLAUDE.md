@@ -355,12 +355,14 @@ Two layers, both running on every state change:
    they no-op unless a metadata table is loaded, then error if a selected
    value isn't a column / replicate / control-value present in it — see §12.
 
-`batch-names-valid` mirrors `validate_batch_names()` in the workflow's
-`modules/utils.nf` (no separator / control chars / surrounding whitespace)
-and adds a uniqueness check the workflow gets for free — a Groovy Map can't
-hold duplicate keys, but the form's entry list can, and the emitter's
-name→path map would silently keep only the last one. Keep the two in sync:
-if the workflow's rule changes, change this rule too.
+`batch-names-valid` mirrors `normalize_batch_map()` + `validate_batch_names()`
+in the workflow's `modules/utils.nf`: surrounding whitespace is **trimmed**
+(by the workflow, and by `normalizeQuantSpectraDir` on emit), so names are
+compared trimmed and only separators / control chars are rejected. It adds a
+uniqueness check the workflow gets for free — a Groovy Map can't hold
+duplicate keys, but the form's entry list can, and the emitter's name→path
+map would silently keep only the last one. Keep the two in sync: if the
+workflow's rule changes, change this rule too.
 
 `runValidation(state) → ValidationReport`. The download / copy buttons
 gate on `report.isDownloadable` (no error-severity issues anywhere).
@@ -1351,7 +1353,7 @@ When you add an `alwaysEmit` field:
 | Metadata membership rules            | YES     | One firing + one silent per `metadata-*-valid` rule |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **630 tests across 32 files**. Run `npm test` before pushing.
+Current count: **632 tests across 32 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff

@@ -436,10 +436,13 @@ const ruleBatchModeEngine: CrossFieldRule = {
 
 // 15b. batch-names-valid
 //
-// Mirrors validate_batch_names() in the workflow's modules/utils.nf, plus a uniqueness
-// check the workflow gets for free (a Groovy Map cannot hold duplicate keys, but this
-// form can). Without the uniqueness check the emitter's name->path map silently keeps
-// only the last entry, so a user could download a config analyzing the wrong data.
+// Mirrors normalize_batch_map() + validate_batch_names() in the workflow's
+// modules/utils.nf. Surrounding whitespace is trimmed rather than rejected (by the
+// workflow and by the emitter), so names are compared trimmed: 'PlateA' and 'PlateA '
+// are the same batch. Uniqueness matters more here than in the workflow -- a Groovy Map
+// cannot hold duplicate keys, but this entry list can, and the emitter's name->path map
+// would silently keep only the last one, so a user could download a config analyzing the
+// wrong data.
 const BATCH_NAME_SEPARATORS = /[/\\]/;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
@@ -461,32 +464,26 @@ const ruleBatchNamesValid: CrossFieldRule = {
   id: 'batch-names-valid',
   severity: 'error',
   check: (s) => {
-    const names = batchEntryNames(s.values['quant_spectra_dir']);
-    if (names.length === 0) return null;
+    const raw = batchEntryNames(s.values['quant_spectra_dir']);
+    if (raw.length === 0) return null;
+    // Compare trimmed, matching the workflow: surrounding whitespace is not significant.
+    const names = raw.map((n) => n.trim()).filter((n) => n !== '');
 
     const seen = new Set<string>();
     const duplicates = new Set<string>();
     for (const n of names) {
-      if (n === '') continue;
       if (seen.has(n)) duplicates.add(n);
       seen.add(n);
     }
     if (duplicates.size > 0) {
       const shown = [...duplicates].map((n) => `'${n}'`).join(', ');
       return {
-        message: `Batch names must be unique; repeated: ${shown}. Only the last entry with a given name would be used.`,
+        message: `Batch names must be unique; repeated: ${shown}. Names are compared after trimming, so 'x' and 'x ' are the same batch.`,
         fields: ['quant_spectra_dir'],
       };
     }
 
     for (const n of names) {
-      if (n === '') continue;
-      if (n !== n.trim()) {
-        return {
-          message: `Batch name '${n}' has leading or trailing whitespace.`,
-          fields: ['quant_spectra_dir'],
-        };
-      }
       if (BATCH_NAME_SEPARATORS.test(n)) {
         return {
           message: `Batch name '${n}' cannot contain '/' or '\\' — batch names become part of a file name.`,
