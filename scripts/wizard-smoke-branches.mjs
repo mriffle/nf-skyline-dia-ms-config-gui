@@ -114,7 +114,7 @@ async function main() {
   await page.waitForSelector('text=Carafe input');
   await page.screenshot({ path: `${SCREENSHOTS_DIR}/C-carafe-input.png`, fullPage: true });
 
-  // ----- D. Raw + Direct + Carafe → demultiplex moves to Carafe screen -----
+  // ----- D. Raw + Direct + Carafe → demultiplex stays on the Vendor RAW screen -----
   await fresh(page);
   await page.getByRole('button', { name: 'Next' }).click();
   // Inputs: a .raw file path so detection picks Thermo Raw.
@@ -137,10 +137,10 @@ async function main() {
   // Library — pick Carafe.
   await page.getByRole('radio', { name: /Generate with Carafe/ }).click();
   await page.getByRole('button', { name: 'Next' }).click();
-  // Carafe input — the demultiplex block should be present.
+  // Carafe input — the demultiplex block should NOT be present here any more.
   await page.waitForSelector('text=Carafe input');
   await logScreens(page, 'D.Direct+Carafe');
-  await page.screenshot({ path: `${SCREENSHOTS_DIR}/D-carafe-demultiplex.png`, fullPage: true });
+  await page.screenshot({ path: `${SCREENSHOTS_DIR}/D-carafe-no-demultiplex.png`, fullPage: true });
 
   // ----- E. PDC + Carafe + Explicit PDC file list -----
   await fresh(page);

@@ -22,7 +22,10 @@ export interface StoreState extends FormState {
 //   v8: metadata (uploaded sample-metadata table) added to persisted state.
 //   v9: batch-map entries changed from { name, path } to { name, paths[] }
 //       so a batch can draw from more than one directory.
-export const CURRENT_STORE_VERSION = 9;
+//   v10: msconvert.do_demultiplex pre-seeded to true (the workflow default) so
+//        the toggle and the vendor-raw-demultiplex rule see the value the
+//        workflow would actually use.
+export const CURRENT_STORE_VERSION = 10;
 
 export const createDefaultState = (): StoreState => ({
   mode: 'general',
@@ -44,6 +47,12 @@ export const createDefaultState = (): StoreState => ({
   // defaultOverride + alwaysEmit on the meta) so a fresh config defaults
   // to HTML-only QC reports and the cross-field rule sees a valid
   // selection from first render.
+  //
+  // msconvert.do_demultiplex is pre-seeded to true to match the workflow
+  // default. Not emitted unless touched -- the seed exists so the toggle
+  // shows the value the workflow would actually use, and so the
+  // vendor-raw-demultiplex rule fires on the untouched-but-effectively-on
+  // case (which the workflow rejects).
   values: {
     use_carafe: true,
     search_engine: 'diann',
@@ -51,6 +60,7 @@ export const createDefaultState = (): StoreState => ({
     'qc_report.report_format': ['html'],
     'batch_report.skip': true,
     'skyline.group_proteins': true,
+    'msconvert.do_demultiplex': true,
   },
   touched: {},
   showAdvanced: false,

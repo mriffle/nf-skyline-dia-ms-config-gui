@@ -3,24 +3,8 @@ import { useFormState } from '../../../hooks/useValidation';
 import { Field } from '../../form/Field';
 import { WizardAdvancedSection } from '../WizardAdvancedSection';
 
-// Demultiplex is a single global msconvert setting that applies to every
-// stream the workflow msconverts. The wizard surfaces it on whichever
-// screen first triggers msconvert.
-//
-// Carafe consumes mzML and .d.zip as-is and only msconverts Thermo .raw.
-// So the only case where demultiplex needs to move to this screen is
-// when the user declared Thermo .raw AND chose to feed RAW directly to
-// DIA-NN — the main quant flow then skips msconvert, but Carafe will
-// still convert its RAW input. For mzML or .d.zip formats Carafe never
-// invokes msconvert, so the demultiplex question doesn't apply here.
-function showDemultiplexHere(state: FormState): boolean {
-  if (state.values['quant_input_format'] !== 'raw') return false;
-  return state.values['use_vendor_raw'] === true;
-}
-
 export function CarafeInputScreen() {
   const state = useFormState();
-  const surfaceDemultiplex = showDemultiplexHere(state);
 
   return (
     <div className="space-y-5">
@@ -41,21 +25,6 @@ export function CarafeInputScreen() {
       <Field path="carafe.spectra_files" bypassTier />
       <Field path="carafe.pdc_files" bypassTier />
       <Field path="carafe.pdc_n_files" bypassTier />
-      {surfaceDemultiplex ? (
-        <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50 p-3">
-          <p className="text-[13px] text-amber-900">
-            <span className="font-medium">Carafe still converts Thermo .raw to mzML.</span>{' '}
-            Your main quant flow won&apos;t run msconvert (you chose to
-            feed RAW directly to DIA-NN), but Carafe will. Set the
-            demultiplex option for that conversion:
-          </p>
-          <Field path="msconvert.do_demultiplex" />
-          <WizardAdvancedSection label="Advanced msconvert options">
-            <Field path="msconvert.do_simasspectra" bypassTier />
-            <Field path="msconvert.mz_shift_ppm" bypassTier />
-          </WizardAdvancedSection>
-        </div>
-      ) : null}
       <WizardAdvancedSection label="Advanced Carafe options">
         <Field path="carafe.peptide_results_file" bypassTier />
         <Field path="carafe.carafe_fasta" bypassTier />

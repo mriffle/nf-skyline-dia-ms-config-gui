@@ -19,6 +19,7 @@ describe('store basics', () => {
       'qc_report.report_format': ['html'],
       'batch_report.skip': true,
       'skyline.group_proteins': true,
+      'msconvert.do_demultiplex': true,
     });
     expect(s.touched).toEqual({});
     expect(s.showAdvanced).toBe(false);
@@ -60,6 +61,7 @@ describe('store basics', () => {
       'qc_report.report_format': ['html'],
       'batch_report.skip': true,
       'skyline.group_proteins': true,
+      'msconvert.do_demultiplex': true,
     });
     expect(s.touched).toEqual({});
     expect(s.showAdvanced).toBe(false);
@@ -266,7 +268,7 @@ describe('localStorage persistence', () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!);
     expect(parsed.state.values.fasta).toBe('/persisted.fasta');
-    expect(parsed.version).toBe(9);
+    expect(parsed.version).toBe(10);
   });
 });
 

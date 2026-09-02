@@ -67,7 +67,7 @@ npm run update-schema  # fetch latest schema from mriffle/nf-skyline-dia-ms@main
     │   └── store.ts                    Zustand store + persist middleware
     ├── validation/
     │   ├── fieldSchemas.ts             Zod schemas per widget kind
-    │   ├── crossFieldRules.ts          27 hand-authored cross-field rules
+    │   ├── crossFieldRules.ts          29 hand-authored cross-field rules
     │   ├── runValidation.ts            entry point: state → ValidationReport
     │   └── types.ts
     ├── emit/
@@ -278,10 +278,19 @@ paths that would become invisible.
   an "HTML only" stance. Pre-seeded so the `qc-report-format-required`
   cross-field rule (§5) sees a valid selection from first render.
 
+- `msconvert.do_demultiplex: true` — matches the workflow/schema default.
+  Not `alwaysEmit`; the seed exists so the toggle shows the value the
+  workflow would actually use, and so the `vendor-raw-demultiplex` rule
+  (§5) fires on the untouched case. Without the seed the value reads
+  `undefined`, the rule stays silent, and the builder happily emits a
+  config with `use_vendor_raw = true` and no demultiplex line — which the
+  workflow then rejects at startup, since its own default is `true`.
+
 If you change what's pre-seeded, bump `CURRENT_STORE_VERSION` so the
 `persist.migrate` step resets stale browser drafts to the new default.
-(Currently `9` — v9 changed batch-map entries from `{name, path}` to
-`{name, paths[]}`; v8 added the persisted `metadata` table, see §12.)
+(Currently `10` — v10 pre-seeded `msconvert.do_demultiplex`; v9 changed
+batch-map entries from `{name, path}` to `{name, paths[]}`; v8 added the
+persisted `metadata` table, see §12.)
 
 ### 4. Emit-only-touched invariant (DO NOT BREAK)
 
@@ -348,7 +357,7 @@ Two layers, both running on every state change:
 
 1. **Per-widget Zod schemas** (`fieldSchemas.ts`) — applied only to *visible*
    and *touched* fields. Type-shape correctness.
-2. **Hand-rolled cross-field rules** (`crossFieldRules.ts`) — 27 rules, each
+2. **Hand-rolled cross-field rules** (`crossFieldRules.ts`) — 29 rules, each
    with `id`, `severity: 'error' | 'warning'`, and a `check(state)` returning
    `null` or `{ message, fields }`. Rule IDs are stable and referenced by
    tests. Rules 20-26 are the metadata-membership rules (`metadata-*-valid`):
@@ -904,23 +913,33 @@ the form — there is no parallel "wizard state" to keep in sync.
   Panorama.
 
 **Demultiplex routing.** `msconvert.do_demultiplex` is a single global
-setting that applies to every stream the workflow msconverts. The
-wizard surfaces it as a prominent (non-Advanced) question on
-**exactly one** screen — the one tied to the first stream that
-triggers msconvert:
+setting that applies to every stream the workflow msconverts, and it
+is **mutually exclusive with `use_vendor_raw`** — demultiplexing
+overlapping (staggered) DIA windows is done by msconvert's
+`demultiplex` filter, and vendor RAW skips msconvert entirely, so
+DIA-NN and Skyline would read overlapped spectra undeconvolved. The
+workflow rejects the combination at startup; here it is the
+`vendor-raw-demultiplex` error rule (§5).
 
-- Vendor RAW screen, when "Convert RAW to mzML first" is chosen — the
-  main quant flow runs msconvert there.
-- Carafe Input screen, when format=raw AND the user picked Feed RAW
-  directly to DIA-NN. The main flow skips msconvert, but Carafe still
-  converts Thermo .raw to mzML. Encoded by `showDemultiplexHere()` in
-  `screens/CarafeInputScreen.tsx`. The amber notice explains *why* the
-  question is repositioned. For format=mzml or format=.d.zip the
-  Carafe screen never surfaces demultiplex — Carafe consumes those
-  formats without msconvert.
+Because of that, the Vendor RAW screen surfaces demultiplex in **both**
+branches:
+
+- "Convert RAW to mzML first" — the ordinary question, in a neutral box.
+- "Feed RAW directly to DIA-NN" — same field, in a box that turns red
+  when the value is `true`, explaining the conflict. It has to be
+  answerable here: an error does not block wizard Next (it surfaces on
+  Review), and `setValue` marks a path touched permanently, so a user
+  who enabled demultiplex under "convert" and then switched to "direct"
+  still emits `msconvert.do_demultiplex = true`. Hiding the field would
+  leave them with an unresolvable error.
+
+The Carafe Input screen no longer surfaces demultiplex at all. It used
+to, via `showDemultiplexHere()`, for format=raw + vendor RAW — exactly
+the combination that is now rejected.
 
 `msconvert.do_simasspectra` and `msconvert.mz_shift_ppm` always live
-inside an Advanced expander adjacent to demultiplex.
+inside an Advanced expander adjacent to demultiplex, on the convert
+branch only.
 
 **Field reuse**: each screen renders existing widgets via `<Field
 path="...">` so the dropdowns, glob/regex pair, batch map, etc. behave
@@ -1353,7 +1372,7 @@ When you add an `alwaysEmit` field:
 | Metadata membership rules            | YES     | One firing + one silent per `metadata-*-valid` rule |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **632 tests across 32 files**. Run `npm test` before pushing.
+Current count: **637 tests across 32 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff

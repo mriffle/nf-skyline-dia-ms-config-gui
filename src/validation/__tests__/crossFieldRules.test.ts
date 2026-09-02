@@ -941,6 +941,76 @@ describe('rule: vendor-raw-engine', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 18b. vendor-raw-demultiplex
+// ---------------------------------------------------------------------------
+
+describe('rule: vendor-raw-demultiplex', () => {
+  const rule = ruleById('vendor-raw-demultiplex');
+
+  it('fires when use_vendor_raw + demultiplex', () => {
+    const r = rule.check(
+      makeState({
+        values: {
+          ...VALID_DIANN_GENERAL,
+          use_vendor_raw: true,
+          'msconvert.do_demultiplex': true,
+        },
+      }),
+    );
+    expect(r).not.toBeNull();
+    expect(rule.severity).toBe('error');
+  });
+
+  it('stays silent for use_vendor_raw without demultiplex', () => {
+    expect(
+      rule.check(
+        makeState({
+          values: {
+            ...VALID_DIANN_GENERAL,
+            use_vendor_raw: true,
+            'msconvert.do_demultiplex': false,
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('stays silent for demultiplex without use_vendor_raw', () => {
+    expect(
+      rule.check(
+        makeState({
+          values: { ...VALID_DIANN_GENERAL, 'msconvert.do_demultiplex': true },
+        }),
+      ),
+    ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 18c. msconvert-only-vendor-raw
+// ---------------------------------------------------------------------------
+
+describe('rule: msconvert-only-vendor-raw', () => {
+  const rule = ruleById('msconvert-only-vendor-raw');
+
+  it('fires when msconvert_only + use_vendor_raw', () => {
+    const r = rule.check(
+      makeState({
+        values: { ...QUANT_OK, msconvert_only: true, use_vendor_raw: true },
+      }),
+    );
+    expect(r).not.toBeNull();
+    expect(rule.severity).toBe('error');
+  });
+
+  it('stays silent for msconvert_only without use_vendor_raw', () => {
+    expect(
+      rule.check(makeState({ values: { ...QUANT_OK, msconvert_only: true } })),
+    ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 19. qc-report-format-required
 // ---------------------------------------------------------------------------
 
@@ -986,8 +1056,8 @@ describe('rule: qc-report-format-required', () => {
 // ---------------------------------------------------------------------------
 
 describe('crossFieldRules list', () => {
-  it('contains exactly 27 rules', () => {
-    expect(crossFieldRules.length).toBe(27);
+  it('contains exactly 29 rules', () => {
+    expect(crossFieldRules.length).toBe(29);
   });
 
   it('has unique rule IDs', () => {

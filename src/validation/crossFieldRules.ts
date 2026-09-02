@@ -547,6 +547,42 @@ const ruleVendorRawEngine: CrossFieldRule = {
   },
 };
 
+// 18b. vendor-raw-demultiplex
+//
+// Demultiplexing is done by msconvert, which vendor RAW skips. Deliberately not
+// gated on quant_input_format: that key is wizard-only, so a rule that depended on
+// it would go silent for form-mode users and for imported configs -- the cases where
+// this combination is most likely to arrive.
+const ruleVendorRawDemultiplex: CrossFieldRule = {
+  id: 'vendor-raw-demultiplex',
+  severity: 'error',
+  check: (s) => {
+    if (s.values['use_vendor_raw'] !== true) return null;
+    if (s.values['msconvert.do_demultiplex'] !== true) return null;
+    return {
+      message:
+        'Demultiplexing requires msconvert, but reading vendor RAW directly skips it. ' +
+        'Turn off vendor RAW if your DIA windows overlap, or turn off demultiplex if they do not.',
+      fields: ['use_vendor_raw', 'msconvert.do_demultiplex'],
+    };
+  },
+};
+
+// 18c. msconvert-only-vendor-raw
+const ruleMsconvertOnlyVendorRaw: CrossFieldRule = {
+  id: 'msconvert-only-vendor-raw',
+  severity: 'error',
+  check: (s) => {
+    if (s.values['msconvert_only'] !== true) return null;
+    if (s.values['use_vendor_raw'] !== true) return null;
+    return {
+      message:
+        'msconvert-only mode has nothing to convert when vendor RAW files are read directly.',
+      fields: ['use_vendor_raw', 'msconvert_only'],
+    };
+  },
+};
+
 // 19. qc-report-format-required
 const ruleQcReportFormatRequired: CrossFieldRule = {
   id: 'qc-report-format-required',
@@ -710,6 +746,8 @@ export const crossFieldRules: readonly CrossFieldRule[] = Object.freeze([
   rulePanoramaUploadRequiresUrl,
   rulePanoramaImportPrereqs,
   ruleVendorRawEngine,
+  ruleVendorRawDemultiplex,
+  ruleMsconvertOnlyVendorRaw,
   ruleQcReportFormatRequired,
   ruleMetadataColorVars,
   ruleMetadataExcludeReplicates,
