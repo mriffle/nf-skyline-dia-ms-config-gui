@@ -577,7 +577,8 @@ const ruleMsconvertOnlyVendorRaw: CrossFieldRule = {
     if (s.values['use_vendor_raw'] !== true) return null;
     return {
       message:
-        'msconvert-only mode has nothing to convert when vendor RAW files are read directly.',
+        'msconvert-only mode requires vendor RAW to be off. ' +
+        'Reading RAW directly skips msconvert, so nothing would be converted.',
       fields: ['use_vendor_raw', 'msconvert_only'],
     };
   },
