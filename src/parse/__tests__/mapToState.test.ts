@@ -82,6 +82,7 @@ describe('mapToState — happy paths', () => {
   it('loads booleans, integers, numbers, strings, null', () => {
     const r = mapToState([
       e('qc_report.skip', false),
+      e('slack.enabled', true),
       e('max_cpus', 16),
       e('cascadia.score_threshold', 0.7),
       e('email', 'me@example.com'),
@@ -89,6 +90,7 @@ describe('mapToState — happy paths', () => {
     ]);
     expect(r.report.issues).toEqual([]);
     expect(r.state.values['qc_report.skip']).toBe(false);
+    expect(r.state.values['slack.enabled']).toBe(true);
     expect(r.state.values['max_cpus']).toBe(16);
     expect(r.state.values['cascadia.score_threshold']).toBe(0.7);
     expect(r.state.values['email']).toBe('me@example.com');

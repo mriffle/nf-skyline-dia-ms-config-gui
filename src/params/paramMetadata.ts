@@ -1032,6 +1032,18 @@ export const paramMetadata: readonly ParamMeta[] = [
     widget: 'text',
     group: 'Notifications',
   },
+  {
+    // Only the on/off switch is a parameter. The webhook URL is a credential and is
+    // deliberately not a field: the workflow reads it from a Nextflow secret, and the
+    // generated config is uploaded to Panorama as-is.
+    path: 'slack.enabled',
+    section: 'panorama',
+    label: 'Slack notifications',
+    help: "Send a Slack message when the run starts and when it ends (success or failure). Needs a one-time setup on the computer that runs Nextflow: create a Slack incoming webhook, then run: nextflow secrets set SLACK_WEBHOOK_URL '<your webhook URL>'. Never put the webhook URL in this config. If the secret is missing or Slack cannot be reached, the run continues and logs a warning. Setup steps: https://nf-skyline-dia-ms.readthedocs.io/en/latest/how_to_install.html",
+    tier: 'advanced',
+    widget: 'boolean',
+    group: 'Notifications',
+  },
 
   // =====================================================================
   // execution

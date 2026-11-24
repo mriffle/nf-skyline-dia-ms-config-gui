@@ -408,6 +408,29 @@ describe('emitConfig — nested namespace collapse', () => {
   });
 });
 
+describe('emitConfig — Slack notifications', () => {
+  it('emits only the on/off switch, with the secret command as a comment placeholder', () => {
+    const out = emit(makeState({ values: { 'slack.enabled': true } }));
+    expect(out).toContain('    slack.enabled = true');
+    // The webhook URL is a Nextflow secret, never a config value: the comment
+    // shows the command with a placeholder and no assignment mentions the secret.
+    const lines = out.split('\n');
+    const isComment = (l: string): boolean => l.trim().startsWith('//');
+    // Comments are wrapped, so join them before looking for the command.
+    const comments = lines
+      .filter(isComment)
+      .map((l) => l.trim().replace(/^\/\/\s?/, ''))
+      .join(' ');
+    expect(comments).toContain("nextflow secrets set SLACK_WEBHOOK_URL '<your webhook URL>'");
+    const assignments = lines.filter((l) => !isComment(l)).join('\n');
+    expect(assignments).not.toMatch(/webhook|hooks\.slack\.com/i);
+  });
+
+  it('is not emitted when untouched', () => {
+    expect(emit(makeState())).not.toContain('slack');
+  });
+});
+
 describe('emitConfig — untouched values are skipped', () => {
   it('a value present in `values` but not marked touched is not emitted', () => {
     const state: FormState = {

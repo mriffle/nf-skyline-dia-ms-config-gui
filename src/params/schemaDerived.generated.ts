@@ -116,6 +116,7 @@ export const schemaDerived: SchemaDerivedMap = {
   "skyline.skyr_file": { path: "skyline.skyr_file", shape: { kind: 'string-or-list' }, defaultValue: null, hidden: false } satisfies SchemaDerivedEntry,
   "skyline.template_file": { path: "skyline.template_file", shape: { kind: 'string' }, defaultValue: null, hidden: false } satisfies SchemaDerivedEntry,
   "skyline.use_hardlinks": { path: "skyline.use_hardlinks", shape: { kind: 'boolean' }, defaultValue: false, hidden: false } satisfies SchemaDerivedEntry,
+  "slack.enabled": { path: "slack.enabled", shape: { kind: 'boolean' }, defaultValue: false, hidden: false } satisfies SchemaDerivedEntry,
   "spectral_library": { path: "spectral_library", shape: { kind: 'string' }, defaultValue: null, hidden: false } satisfies SchemaDerivedEntry,
   "use_vendor_raw": { path: "use_vendor_raw", shape: { kind: 'boolean' }, defaultValue: null, hidden: false } satisfies SchemaDerivedEntry,
   "vendor_raw_copy": { path: "vendor_raw_copy", shape: { kind: 'boolean' }, defaultValue: null, hidden: false } satisfies SchemaDerivedEntry,

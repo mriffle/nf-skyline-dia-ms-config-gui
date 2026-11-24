@@ -1336,6 +1336,11 @@ When you add an `alwaysEmit` field:
   `no-search-requires-library` and the emitter's null handling still
   exist (for testing and for users who hand-edit the generated config),
   but the form cannot produce `search_engine: null` through any control.
+- **Notification params live in the `panorama` section** under the
+  `Notifications` group (`email`, `slack.enabled`), both advanced-tier and
+  form-only. Groups form from *adjacent* `ParamMeta` entries, so a new
+  notification param must sit next to them. Neither adds a workflow process,
+  so neither appears in the workflow graph.
 - **`Field` accepts a `bypassTier` prop.** The form pane gates advanced
   fields on `store.showAdvanced`; the wizard renders advanced fields
   inside its per-screen `<WizardAdvancedSection>` with `bypassTier`
@@ -1372,7 +1377,7 @@ When you add an `alwaysEmit` field:
 | Metadata membership rules            | YES     | One firing + one silent per `metadata-*-valid` rule |
 | Visual regression (SVG)              | MANUAL  | `scripts/visual-check.mjs` on demand |
 
-Current count: **637 tests across 32 files**. Run `npm test` before pushing.
+Current count: **639 tests across 32 files**. Run `npm test` before pushing.
 
 Every meaningful new feature should grow tests. Every golden-file scenario
 change should regenerate the golden bytes (compare carefully — the diff
@@ -1407,6 +1412,12 @@ should match what you intended to change).
   + the `Default: X` hint instead.
 - Don't expose hidden / legacy params (e.g. `skyline_document_name` top-level
   alias) in the UI.
+- Don't add form fields for credentials. The generated config is uploaded to
+  Panorama as-is by the workflow, so secrets never belong in it. Credentials
+  live in Nextflow secrets on the user's machine; the form surfaces only the
+  switch that uses them and the help text gives the `nextflow secrets set`
+  command with a placeholder. Example: `slack.enabled` is a field, the Slack
+  webhook URL (`SLACK_WEBHOOK_URL` secret) is not.
 - Don't add UI libraries. Tailwind primitives + small custom components only.
 - Don't break the byte-stability of emit output. If you need new nondeterministic
   state, route it through emit options instead.
